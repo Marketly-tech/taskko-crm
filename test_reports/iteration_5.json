@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 5 — Notifications + Admin EOD summary/email tested end-to-end. Backend: 24/24 pytest GREEN in /app/backend/tests/backend_test_v5.py covering: (a) POST /api/notifications/refresh returns {created:int>=0} and re-running does not duplicate manager-scope aggregate types (dedupe_key logic verified: team_overdue/stale_lead/negotiation_pending/exec_no_activity counts stable across refresh), (b) role-scoped listing: admin sees admin+manager+personal; manager NEVER sees role_scope=='admin'; executive priya only sees notifs with user_id==her.id and none of the manager-scope aggregate types, (c) POST /notifications/{id}/read decrements unread by 1 and flips read=true; POST /notifications/read-all zeroes unread for the caller, (d) POST /leads with assigned_to=priya spawns lead_assigned notif visible to priya with meta.lead_id matching, (e) POST /follow-ups spawns followup_due notif with meta.followup_id, (f) GET /admin/eod-summary as admin returns full schema {date, generated_at, followups.{due_today,overdue}, milestones.{bookings,new_leads,site_visits_completed}, calls.{total,connected,missed,talk_time_sec}, top_execs:list}; manager & executive both get 403, (g) POST /admin/eod-email/send admin returns {sent,errors[],date}; errors[] shape validated (each entry has email+error keys); manager+exec 403, (h) regression: /dashboard/monthly, /dashboard/revenue-breakdown, /leads, /projects, /follow-ups, /site-visits, /twilio/status, /users, /auth/me all 200. Frontend Playwright: (1) admin login → EOD modal AUTO-OPENED at local time 19:xx (>=18:00) → localStorage key 'tasko-eod-shown-2026-07-15' set to '1' → dismiss button removes it. (2) NotificationBell renders in topbar with red badge; after refresh created=15 notifs, dropdown shows 4 recent items + Mark-all read button. Clicking mark-all zeroed the badge. (3) Admin ACTION ITEMS tab (dash-tab-actions) shows dash-eod-card. Send-now button triggered POST /admin/eod-email/send → 200 with sent=0 (Resend testing-mode limitation, expected per spec) → frontend showed toast 'No admin recipients found.' (see MINOR issue below). (4) Manager login: no modal, no card on action-items tab, /notifications returns only role_scope in (null, 'manager') — never 'admin'. (5) Executive priya: no modal, no card; /notifications only returns items with user_id==her.id AND none of the manager-scope aggregate types; mark-all still functional. Screenshot verified Priya's dropdown showing 'Follow-up due today', 'New lead assigned', 'Site visit tomorrow' — all personal.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /admin/eod-email/send", "issue": "When Resend returns an error for a non-verified recipient (testing mode), the errors[] array is populated but 'sent' stays 0. That is per-spec, but there is no aggregate 'errors' count separate from sent — a client cannot easily tell '0 admins' from '3 admins all bounced'. Consider adding tried/attempted count to distinguish."},
+      {"endpoint": "GET /notifications", "issue": "Uses lexicographic string comparison on 'created_at' ISO strings for sort and 24h dedupe window. Works because now_utc() always emits UTC ISO with same timezone offset — but if any historical row has a different TZ suffix, the dedupe window becomes inaccurate. Consider storing datetime objects and using Mongo Date type."},
+      {"endpoint": "POST /notifications/refresh", "issue": "The dedupe_key uses 'today_start.date()' bucketing (UTC) — so an admin in IST checking at 04:30 IST (23:00 UTC previous day) will see 'yesterday-UTC' aggregates dedup twice. Minor: bucket by IST or user timezone if that matters."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AdminEODSummary.jsx sendEmail()", "issue": "Toast copy 'No admin recipients found.' is shown whenever r.data.sent===0. But sent===0 can happen for TWO reasons: (a) no admin users, or (b) Resend rejected all recipients (errors[] non-empty). Right now Resend testing-mode failures are misleadingly labelled 'no recipients'. Suggest: if (data.errors?.length) toast.error(`Email failed for ${data.errors.length} admin(s): ${data.errors[0].error}`) else if (sent===0) toast.warning('No admin recipients found.').", "selector": "[data-testid='dash-eod-send-email']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AdminEODSummary modal", "issues": ["DialogContent renders without <DialogDescription> — same Radix a11y warning as iteration 4: 'Missing Description or aria-describedby={undefined} for {DialogContent}'. Also affects other dialogs."]},
+      {"screen": "Dashboard first paint", "issues": ["Recharts 'width(-1) height(-1)' warnings still logged on first render — carried from iteration 4."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v5.py",
+    "/app/test_reports/pytest/pytest_results_v5.xml"
+  ],
+  "action_items": [
+    "[Medium] Fix misleading EOD send-email toast — differentiate between sent=0-because-no-admins and sent=0-because-Resend-errored. Read data.errors[] and surface the first error message to admin so they know the domain isn't verified.",
+    "[Low] Add <DialogDescription> to the EOD modal DialogContent to silence Radix a11y warning.",
+    "[Low] Consider IST-bucketed dedupe_key in refresh_notifications for admins operating in IST post-midnight UTC."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 2614 lines — the notifications block (~230 lines) and EOD block (~230 lines) are prime candidates to move into routers/notifications.py + routers/eod.py + services/eod_email.py. Especially _eod_html() (72 lines of inline HTML) belongs in templates/.",
+    "create_notification() dedupe is O(N) per call because it hits Mongo with a find_one for every candidate. On refresh_notifications() this means ~2 queries per follow-up. For a tenant with 500 pending follow-ups + 200 site visits, one refresh call = ~1400 Mongo round-trips. Add a compound index on (dedupe_key, user_id, role_scope, created_at) OR batch-check dedupe keys with a single $in query at the top of refresh_notifications().",
+    "refresh_notifications() always returns created = number of create_notification() *calls* — not number actually inserted (dedupe-skipped calls also increment 'created'). This is why the test above shows created=15 even after the second identical refresh. Fix: only increment when actually inserted (have create_notification return bool).",
+    "AdminEODSummary.jsx uses `now.toISOString().slice(0,10)` for the localStorage day key — this is UTC date, not local. So an admin in IST logging in at 00:30 IST (19:00 UTC previous day) will use YESTERDAY-UTC as the key, meaning the modal could re-open twice on the IST 'same day'. Use local date components instead: `${now.getFullYear()}-${(now.getMonth()+1).toString().padStart(2,'0')}-${now.getDate().toString().padStart(2,'0')}`.",
+    "resend Emails.send is called via asyncio.to_thread which is fine, but there is no per-call timeout — if Resend hangs the endpoint hangs too. Wrap in asyncio.wait_for with a 10s timeout.",
+    "SENDER_EMAIL defaults to 'onboarding@resend.dev' which is Resend's test sender. Once the domain is verified this MUST be updated in backend/.env — flag this in deployment checklist."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v5.py (new — 24 tests, ~4s wall)",
+    "/app/test_reports/pytest/pytest_results_v5.xml"
+  ],
+  "success_rate": {"backend": "100% (24/24)", "frontend": "100% (5 flows: auto-modal + localStorage, bell dropdown + mark-all, admin card + send-email, manager scope, executive scope)"},
+  "test_credentials": "admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123 — all verified.",
+  "seed_data_creation": "TEST_notif_lead_* and TEST_fu_lead_* leads + follow-ups created and deleted in each test method. Notifications generated by refresh_notifications() persist across tests (not deleted — desired for aggregate dedupe validation).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 backend suite lives at /app/backend/tests/backend_test_v5.py — 24 tests, focus on notifications + EOD. Fixtures use module scope so login happens once per role. Regression endpoints covered inline. If main agent fixes the toast copy or the created-count-includes-dedupe-skipped bug, re-run this file. Note: the EOD modal auto-open uses UTC date for its localStorage key — flagged in critical_code_review_comments — worth fixing but currently 'works' if the admin's browser TZ is UTC-aligned during login.",
+  "rca_of_the_issue": "No bugs blocking the sprint. The one MEDIUM-priority frontend UX issue (misleading 'No admin recipients found' toast when Resend rejects all recipients) has clear reproduction: as admin, click 'Send now' on the EOD card while Resend key is in testing mode with an unverified recipient — backend correctly returns {sent:0, errors:[{email,error}]} but the frontend collapses that into the 'no recipients' message. Fix by checking data.errors.length first in AdminEODSummary.jsx sendEmail()."
+}

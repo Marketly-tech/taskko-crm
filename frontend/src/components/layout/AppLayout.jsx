@@ -2,6 +2,7 @@ import React from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
+import AdminEODSummary from "@/components/AdminEODSummary";
 
 export default function AppLayout() {
   return (
@@ -13,6 +14,7 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+      <AdminEODSummary mode="modal-controller" />
     </div>
   );
 }

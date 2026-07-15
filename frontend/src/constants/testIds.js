@@ -10,6 +10,9 @@ export const NAV = {
   sidebar: "app-sidebar",
   topbar: "app-topbar",
   projectSwitcher: "topbar-project-switcher",
+  notifBell: "topbar-notif-bell",
+  notifItem: (id) => `notif-item-${id}`,
+  notifMarkAll: "notif-mark-all",
   itemDashboard: "nav-dashboard",
   itemLeads: "nav-leads",
   itemVisits: "nav-visits",
@@ -37,6 +40,10 @@ export const DASH = {
   kpiFollowups: "dash-kpi-followups",
   kpiScheduledCalls: "dash-kpi-scheduled-calls",
   kpiTasks: "dash-kpi-tasks",
+  eodCard: "dash-eod-card",
+  eodModal: "dash-eod-modal",
+  eodSendEmail: "dash-eod-send-email",
+  eodDismiss: "dash-eod-dismiss",
 };
 
 export const LEADS = {

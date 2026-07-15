@@ -563,6 +563,16 @@ async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
     await db.leads.insert_one(doc)
     doc.pop("_id", None)
     await log_activity(doc["id"], actor, "lead_created", f"Lead created from {doc['source']}")
+    # Notify the assigned executive
+    if doc.get("assigned_to"):
+        await create_notification(
+            type="lead_assigned",
+            title="New lead assigned",
+            message=f"{doc['name']} · {doc.get('source', 'manual')}",
+            user_id=doc["assigned_to"],
+            link=f"/leads/{doc['id']}",
+            meta={"lead_id": doc["id"]},
+        )
     # Auto-call on new lead assignment (Twilio)
     settings = await db.settings.find_one({"id": "singleton"}) or {}
     if settings.get("auto_call_on_new_lead") and doc.get("assigned_to") and doc.get("phone"):
@@ -609,7 +619,17 @@ async def assign_lead(lead_id: str, body: AssignBody, actor: dict = Depends(requ
         raise HTTPException(status_code=404, detail="Lead not found")
     assignee = await db.users.find_one({"id": body.user_id}, {"name": 1, "_id": 0})
     await log_activity(lead_id, actor, "assignment", f"Assigned to {assignee.get('name', body.user_id) if assignee else body.user_id}")
-    return await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if lead:
+        await create_notification(
+            type="lead_assigned",
+            title="New lead assigned",
+            message=f"{lead.get('name', 'Lead')} · {lead.get('source', 'manual')}",
+            user_id=body.user_id,
+            link=f"/leads/{lead_id}",
+            meta={"lead_id": lead_id},
+        )
+    return lead
 
 
 @api.post("/leads/{lead_id}/stage")
@@ -673,6 +693,15 @@ async def _ingest_lead_from_payload(source: str, payload: dict) -> dict:
     await db.leads.insert_one(lead)
     lead.pop("_id", None)
     await log_activity(lead["id"], None, "lead_created", f"Auto-captured from {source}", {"raw": payload})
+    if lead.get("assigned_to"):
+        await create_notification(
+            type="lead_assigned",
+            title="New lead assigned",
+            message=f"{lead['name']} · {source}",
+            user_id=lead["assigned_to"],
+            link=f"/leads/{lead['id']}",
+            meta={"lead_id": lead["id"]},
+        )
     settings = await db.settings.find_one({"id": "singleton"}) or {}
     if settings.get("auto_call_on_new_lead") and lead.get("assigned_to") and lead.get("phone"):
         assignee = await db.users.find_one({"id": lead["assigned_to"]})
@@ -729,6 +758,16 @@ async def create_visit(body: SiteVisitBody, actor: dict = Depends(get_current_us
     # advance lead to site_visit stage
     await db.leads.update_one({"id": doc["lead_id"]}, {"$set": {"stage": "site_visit", "updated_at": now_utc().isoformat()}})
     await log_activity(doc["lead_id"], actor, "site_visit_scheduled", f"Site visit scheduled at {doc['scheduled_at']}")
+    if doc.get("assigned_to"):
+        lead = await db.leads.find_one({"id": doc["lead_id"]}, {"name": 1, "_id": 0})
+        await create_notification(
+            type="sitevisit_reminder",
+            title="Site visit scheduled",
+            message=f"{(lead or {}).get('name', 'Lead')} · {doc['scheduled_at'][:16].replace('T', ' ')}",
+            user_id=doc["assigned_to"],
+            link=f"/leads/{doc['lead_id']}",
+            meta={"visit_id": doc["id"]},
+        )
     return doc
 
 
@@ -783,6 +822,16 @@ async def create_followup(body: FollowUpBody, actor: dict = Depends(get_current_
     await db.follow_ups.insert_one(doc)
     doc.pop("_id", None)
     await log_activity(doc["lead_id"], actor, "followup_scheduled", f"Follow-up scheduled at {doc['due_at']}")
+    if doc.get("assigned_to"):
+        lead = await db.leads.find_one({"id": doc["lead_id"]}, {"name": 1, "_id": 0})
+        await create_notification(
+            type="followup_due",
+            title="Follow-up scheduled",
+            message=f"{doc.get('kind', 'call').title()} · {(lead or {}).get('name', 'Lead')} · {doc['due_at'][:16].replace('T', ' ')}",
+            user_id=doc["assigned_to"],
+            link=f"/leads/{doc['lead_id']}",
+            meta={"followup_id": doc["id"]},
+        )
     return doc
 
 
@@ -1568,6 +1617,17 @@ async def twilio_status_callback(request: Request):
 
     if is_missed:
         settings = await db.settings.find_one({"id": "singleton"}) or {}
+        # notify the executive/manager of missed call
+        lead = await db.leads.find_one({"id": act["lead_id"]}, {"name": 1, "assigned_to": 1, "_id": 0})
+        if lead and lead.get("assigned_to"):
+            await create_notification(
+                type="missed_call",
+                title="Missed call",
+                message=f"{lead.get('name', 'Lead')} did not connect ({call_status})",
+                user_id=lead["assigned_to"],
+                link=f"/leads/{act['lead_id']}",
+                meta={"lead_id": act["lead_id"], "call_sid": key_sid},
+            )
         if settings.get("missed_call_followup_enabled", True):
             hours = float(settings.get("missed_call_followup_hours", 24))
             due = now_utc() + timedelta(hours=hours)
@@ -1743,6 +1803,468 @@ async def import_units(body: UnitImportBody, actor: dict = Depends(require_roles
             failed += 1
     return {"created": created, "failed": failed, "replaced": body.replace_existing}
 
+
+
+# ---------------------------------------------------------------------------
+# NOTIFICATIONS — role-scoped in-app alerts
+# ---------------------------------------------------------------------------
+NOTIF_TYPES = Literal[
+    "lead_assigned", "followup_due", "sitevisit_reminder", "missed_call",
+    "team_overdue", "stale_lead", "negotiation_pending", "exec_no_activity",
+    "eod_summary",
+]
+
+
+class NotificationBody(BaseDoc):
+    id: Optional[str] = None
+    user_id: Optional[str] = None
+    role_scope: Optional[str] = None  # "admin" | "manager" | "executive" | None
+    type: str
+    title: str
+    message: str
+    link: Optional[str] = None
+    meta: Optional[dict] = None
+
+
+async def create_notification(
+    *,
+    type: str,
+    title: str,
+    message: str,
+    user_id: Optional[str] = None,
+    role_scope: Optional[str] = None,
+    link: Optional[str] = None,
+    meta: Optional[dict] = None,
+    dedupe_key: Optional[str] = None,
+) -> None:
+    """Insert a notification. If dedupe_key given, skip if one already exists
+    for the same target and key in the last 24h."""
+    if dedupe_key:
+        since = (now_utc() - timedelta(hours=24)).isoformat()
+        exists = await db.notifications.find_one({
+            "dedupe_key": dedupe_key,
+            "user_id": user_id,
+            "role_scope": role_scope,
+            "created_at": {"$gte": since},
+        })
+        if exists:
+            return
+    doc = {
+        "id": new_id(),
+        "user_id": user_id,
+        "role_scope": role_scope,
+        "type": type,
+        "title": title,
+        "message": message,
+        "link": link,
+        "meta": meta or {},
+        "read": False,
+        "dedupe_key": dedupe_key,
+        "created_at": now_utc().isoformat(),
+    }
+    await db.notifications.insert_one(doc)
+
+
+def _notif_scope_filter(user: dict) -> dict:
+    """Admin sees admin + manager notifs (and personal). Manager sees manager notifs (and personal). Executive only personal."""
+    role = user.get("role")
+    scopes = []
+    if role == "admin":
+        scopes = ["admin", "manager"]
+    elif role == "manager":
+        scopes = ["manager"]
+    ors: list = [{"user_id": user["id"]}]
+    if scopes:
+        ors.append({"role_scope": {"$in": scopes}})
+    return {"$or": ors}
+
+
+@api.get("/notifications")
+async def list_notifications(unread_only: bool = False, user: dict = Depends(get_current_user)):
+    q = _notif_scope_filter(user)
+    if unread_only:
+        q = {**q, "read": False}
+    docs = await db.notifications.find(q, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    unread = await db.notifications.count_documents({**q, "read": False})
+    return {"items": docs, "unread": unread}
+
+
+@api.post("/notifications/{nid}/read")
+async def mark_read(nid: str, user: dict = Depends(get_current_user)):
+    scope = _notif_scope_filter(user)
+    await db.notifications.update_one({"id": nid, **scope}, {"$set": {"read": True}})
+    return {"ok": True}
+
+
+@api.post("/notifications/read-all")
+async def mark_all_read(user: dict = Depends(get_current_user)):
+    scope = _notif_scope_filter(user)
+    r = await db.notifications.update_many({**scope, "read": False}, {"$set": {"read": True}})
+    return {"ok": True, "updated": r.modified_count}
+
+
+async def refresh_notifications() -> dict:
+    """Compute time-sensitive notifications: due follow-ups, upcoming visits,
+    stale leads, team overdue, negotiation pending, exec inactivity."""
+    now = now_utc()
+    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    today_end = today_start + timedelta(days=1)
+    stale_cutoff = (now - timedelta(days=3)).isoformat()
+
+    created = 0
+
+    # Agent-level: follow-ups due today / overdue
+    fus = await db.follow_ups.find({
+        "status": "pending",
+        "due_at": {"$lt": today_end.isoformat()},
+        "assigned_to": {"$ne": None},
+    }, {"_id": 0}).to_list(500)
+    for f in fus:
+        due = f.get("due_at", "")
+        overdue = due < now.isoformat()
+        dedupe = f"fu:{f['id']}:{today_start.date().isoformat()}"
+        lead = await db.leads.find_one({"id": f.get("lead_id")}, {"name": 1, "_id": 0})
+        title = "Follow-up overdue" if overdue else "Follow-up due today"
+        msg = f"{f.get('kind', 'call').title()} · {(lead or {}).get('name', 'Lead')}"
+        await create_notification(
+            type="followup_due",
+            title=title,
+            message=msg,
+            user_id=f["assigned_to"],
+            link=f"/leads/{f['lead_id']}",
+            meta={"followup_id": f["id"], "overdue": overdue},
+            dedupe_key=dedupe,
+        )
+        created += 1
+
+    # Agent-level: site visits within next 24h
+    visits = await db.site_visits.find({
+        "status": "scheduled",
+        "scheduled_at": {"$gte": now.isoformat(), "$lt": (now + timedelta(hours=24)).isoformat()},
+        "assigned_to": {"$ne": None},
+    }, {"_id": 0}).to_list(200)
+    for v in visits:
+        dedupe = f"sv:{v['id']}"
+        lead = await db.leads.find_one({"id": v.get("lead_id")}, {"name": 1, "_id": 0})
+        when = datetime.fromisoformat(v["scheduled_at"]).astimezone(timezone.utc)
+        await create_notification(
+            type="sitevisit_reminder",
+            title="Site visit tomorrow",
+            message=f"{(lead or {}).get('name', 'Lead')} · {when.strftime('%d %b, %H:%M UTC')}",
+            user_id=v["assigned_to"],
+            link=f"/leads/{v['lead_id']}",
+            meta={"visit_id": v["id"]},
+            dedupe_key=dedupe,
+        )
+        created += 1
+
+    # Manager-level: team overdue follow-ups (aggregate)
+    overdue_count = await db.follow_ups.count_documents({
+        "status": "pending",
+        "due_at": {"$lt": now.isoformat()},
+    })
+    if overdue_count > 0:
+        await create_notification(
+            type="team_overdue",
+            title="Team follow-ups overdue",
+            message=f"{overdue_count} follow-up{'s' if overdue_count != 1 else ''} past due across the team",
+            role_scope="manager",
+            link="/follow-ups",
+            meta={"count": overdue_count},
+            dedupe_key=f"team_overdue:{today_start.date().isoformat()}",
+        )
+        created += 1
+
+    # Manager-level: stale leads (no update in 3+ days, not booked/lost)
+    stale = await db.leads.count_documents({
+        "stage": {"$nin": ["booked", "lost"]},
+        "updated_at": {"$lt": stale_cutoff},
+    })
+    if stale > 0:
+        await create_notification(
+            type="stale_lead",
+            title="Stale leads",
+            message=f"{stale} lead{'s' if stale != 1 else ''} with no activity for 3+ days",
+            role_scope="manager",
+            link="/leads",
+            meta={"count": stale},
+            dedupe_key=f"stale_leads:{today_start.date().isoformat()}",
+        )
+        created += 1
+
+    # Manager-level: negotiation stage leads pending
+    negotiation = await db.leads.count_documents({"stage": "negotiation"})
+    if negotiation > 0:
+        await create_notification(
+            type="negotiation_pending",
+            title="Deals in negotiation",
+            message=f"{negotiation} lead{'s' if negotiation != 1 else ''} awaiting decision",
+            role_scope="manager",
+            link="/leads?stage=negotiation",
+            meta={"count": negotiation},
+            dedupe_key=f"negotiation:{today_start.date().isoformat()}",
+        )
+        created += 1
+
+    # Manager-level: executives with 0 activity today
+    execs = await db.users.find({"role": "executive", "active": {"$ne": False}}, {"_id": 0}).to_list(50)
+    idle = []
+    for e in execs:
+        cnt = await db.activities.count_documents({
+            "actor_id": e["id"],
+            "created_at": {"$gte": today_start.isoformat(), "$lt": today_end.isoformat()},
+        })
+        if cnt == 0:
+            idle.append(e["name"])
+    if idle:
+        await create_notification(
+            type="exec_no_activity",
+            title="Executives with no activity today",
+            message=", ".join(idle[:5]) + (f" +{len(idle) - 5} more" if len(idle) > 5 else ""),
+            role_scope="manager",
+            link="/team",
+            meta={"names": idle},
+            dedupe_key=f"exec_idle:{today_start.date().isoformat()}",
+        )
+        created += 1
+
+    return {"created": created}
+
+
+@api.post("/notifications/refresh")
+async def notif_refresh_endpoint(user: dict = Depends(get_current_user)):
+    return await refresh_notifications()
+
+
+# ---------------------------------------------------------------------------
+# ADMIN EOD SUMMARY + RESEND EMAIL
+# ---------------------------------------------------------------------------
+import asyncio  # noqa: E402
+try:
+    import resend  # noqa: E402
+    resend.api_key = os.environ.get("RESEND_API_KEY", "")
+except Exception:
+    resend = None
+
+SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+async def compute_eod_summary(target_date: Optional[datetime] = None) -> dict:
+    """Aggregate today's key metrics for the admin."""
+    now = target_date or now_utc()
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    s, e = day_start.isoformat(), day_end.isoformat()
+
+    # Follow-ups due today
+    fu_due = await db.follow_ups.count_documents({
+        "status": "pending",
+        "due_at": {"$gte": s, "$lt": e},
+    })
+    fu_overdue = await db.follow_ups.count_documents({
+        "status": "pending",
+        "due_at": {"$lt": now.isoformat()},
+    })
+
+    # Milestones today
+    bookings_today = await db.leads.count_documents({
+        "stage": "booked",
+        "updated_at": {"$gte": s, "$lt": e},
+    })
+    site_visits_completed = await db.site_visits.count_documents({
+        "status": "completed",
+        "scheduled_at": {"$gte": s, "$lt": e},
+    })
+    new_leads = await db.leads.count_documents({"created_at": {"$gte": s, "$lt": e}})
+
+    # Calls (from activities): total, connected, missed, total talk time
+    call_kinds = ["outgoing_call", "incoming_call", "missed_call", "call"]
+    calls_pipe = [
+        {"$match": {"kind": {"$in": call_kinds}, "created_at": {"$gte": s, "$lt": e}}},
+        {"$group": {
+            "_id": None,
+            "total": {"$sum": 1},
+            "connected": {"$sum": {"$cond": [{"$eq": ["$meta.disposition", "connected"]}, 1, 0]}},
+            "missed": {"$sum": {"$cond": [{"$eq": ["$kind", "missed_call"]}, 1, 0]}},
+            "talk_time": {"$sum": {"$ifNull": ["$meta.duration_sec", 0]}},
+        }},
+    ]
+    calls_row = None
+    async for r in db.activities.aggregate(calls_pipe):
+        calls_row = r
+    calls = {
+        "total": (calls_row or {}).get("total", 0),
+        "connected": (calls_row or {}).get("connected", 0),
+        "missed": (calls_row or {}).get("missed", 0),
+        "talk_time_sec": int((calls_row or {}).get("talk_time", 0)),
+    }
+
+    # Top performers today (bookings / calls)
+    pipe = [
+        {"$match": {"kind": {"$in": call_kinds}, "created_at": {"$gte": s, "$lt": e}, "actor_id": {"$ne": None}}},
+        {"$group": {"_id": "$actor_id", "calls": {"$sum": 1}, "talk_time": {"$sum": {"$ifNull": ["$meta.duration_sec", 0]}}}},
+        {"$sort": {"calls": -1}}, {"$limit": 5},
+    ]
+    top_execs = []
+    async for r in db.activities.aggregate(pipe):
+        u = await db.users.find_one({"id": r["_id"]}, {"name": 1, "_id": 0})
+        top_execs.append({
+            "name": (u or {}).get("name", "Unknown"),
+            "calls": r["calls"],
+            "talk_time_sec": int(r["talk_time"] or 0),
+        })
+
+    return {
+        "date": day_start.date().isoformat(),
+        "generated_at": now_utc().isoformat(),
+        "followups": {"due_today": fu_due, "overdue": fu_overdue},
+        "milestones": {
+            "bookings": bookings_today,
+            "site_visits_completed": site_visits_completed,
+            "new_leads": new_leads,
+        },
+        "calls": calls,
+        "top_execs": top_execs,
+    }
+
+
+def _fmt_hms(sec: int) -> str:
+    if sec <= 0:
+        return "0m"
+    h = sec // 3600
+    m = (sec % 3600) // 60
+    if h > 0:
+        return f"{h}h {m}m"
+    return f"{m}m"
+
+
+def _eod_html(summary: dict) -> str:
+    c = summary["calls"]
+    m = summary["milestones"]
+    f = summary["followups"]
+    rows_html = ""
+    for t in summary.get("top_execs", []):
+        rows_html += f"<tr><td style='padding:8px 12px;border-top:1px solid #E6E4DD;'>{t['name']}</td><td style='padding:8px 12px;border-top:1px solid #E6E4DD;text-align:right;'>{t['calls']}</td><td style='padding:8px 12px;border-top:1px solid #E6E4DD;text-align:right;'>{_fmt_hms(t['talk_time_sec'])}</td></tr>"
+    if not rows_html:
+        rows_html = "<tr><td colspan='3' style='padding:12px;color:#5C6661;text-align:center;'>No call activity today.</td></tr>"
+    return f"""<div style="font-family:Georgia,serif;max-width:640px;margin:0 auto;background:#F6F1E8;padding:32px;color:#102A20;">
+<div style="letter-spacing:0.22em;font-size:11px;text-transform:uppercase;color:#5C6661;">Tasko · Daily Summary</div>
+<h1 style="font-size:28px;margin:8px 0 4px;letter-spacing:-0.02em;">End of day report</h1>
+<div style="color:#5C6661;font-size:14px;">{summary['date']}</div>
+
+<table style="width:100%;margin-top:24px;border-collapse:collapse;background:#fff;border:1px solid #E6E4DD;">
+  <tr>
+    <td style="padding:16px;border-right:1px solid #E6E4DD;width:33%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">New leads</div>
+      <div style="font-size:32px;font-weight:900;margin-top:4px;">{m['new_leads']}</div>
+    </td>
+    <td style="padding:16px;border-right:1px solid #E6E4DD;width:33%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Bookings</div>
+      <div style="font-size:32px;font-weight:900;margin-top:4px;">{m['bookings']}</div>
+    </td>
+    <td style="padding:16px;width:33%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Site visits done</div>
+      <div style="font-size:32px;font-weight:900;margin-top:4px;">{m['site_visits_completed']}</div>
+    </td>
+  </tr>
+</table>
+
+<table style="width:100%;margin-top:16px;border-collapse:collapse;background:#fff;border:1px solid #E6E4DD;">
+  <tr>
+    <td style="padding:16px;border-right:1px solid #E6E4DD;width:25%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Total calls</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;">{c['total']}</div>
+    </td>
+    <td style="padding:16px;border-right:1px solid #E6E4DD;width:25%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Connected</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#2D6A4F;">{c['connected']}</div>
+    </td>
+    <td style="padding:16px;border-right:1px solid #E6E4DD;width:25%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Missed</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#C25934;">{c['missed']}</div>
+    </td>
+    <td style="padding:16px;width:25%;">
+      <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Talk time</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;">{_fmt_hms(c['talk_time_sec'])}</div>
+    </td>
+  </tr>
+</table>
+
+<div style="margin-top:16px;padding:16px;background:#fff;border:1px solid #E6E4DD;">
+  <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Follow-ups</div>
+  <div style="font-size:14px;margin-top:6px;">Due today: <strong>{f['due_today']}</strong> · Overdue: <strong style="color:#C25934;">{f['overdue']}</strong></div>
+</div>
+
+<div style="margin-top:16px;background:#fff;border:1px solid #E6E4DD;">
+  <div style="padding:12px 16px;border-bottom:1px solid #E6E4DD;font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#5C6661;">Top executives · today</div>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="color:#5C6661;text-transform:uppercase;font-size:10px;letter-spacing:0.15em;">
+      <th style="padding:8px 12px;text-align:left;">Name</th>
+      <th style="padding:8px 12px;text-align:right;">Calls</th>
+      <th style="padding:8px 12px;text-align:right;">Talk time</th>
+    </tr></thead>
+    <tbody>{rows_html}</tbody>
+  </table>
+</div>
+
+<div style="margin-top:24px;font-size:11px;color:#5C6661;">
+  Generated by Tasko CRM · {summary['generated_at']}
+</div>
+</div>"""
+
+
+async def send_eod_email_to_admins() -> dict:
+    """Send today's summary to all admin users. Uses Resend when available."""
+    summary = await compute_eod_summary()
+    admins = await db.users.find({"role": "admin", "active": {"$ne": False}}, {"_id": 0}).to_list(50)
+    if not admins:
+        return {"sent": 0, "reason": "no admins"}
+    html = _eod_html(summary)
+    subject = f"Tasko · End of day report · {summary['date']}"
+    sent = 0
+    errors = []
+    for a in admins:
+        if not a.get("email"):
+            continue
+        params = {"from": SENDER_EMAIL, "to": [a["email"]], "subject": subject, "html": html}
+        try:
+            if resend and resend.api_key:
+                r = await asyncio.to_thread(resend.Emails.send, params)
+                sent += 1
+                await db.eod_emails.insert_one({
+                    "id": new_id(),
+                    "admin_id": a["id"],
+                    "email": a["email"],
+                    "date": summary["date"],
+                    "email_id": r.get("id") if isinstance(r, dict) else None,
+                    "created_at": now_utc().isoformat(),
+                })
+            else:
+                log.info("[MOCK] EOD email to %s · subject=%s", a["email"], subject)
+                sent += 1
+                await db.eod_emails.insert_one({
+                    "id": new_id(),
+                    "admin_id": a["id"],
+                    "email": a["email"],
+                    "date": summary["date"],
+                    "mock": True,
+                    "created_at": now_utc().isoformat(),
+                })
+        except Exception as exc:
+            log.warning("EOD email failed for %s: %s", a["email"], exc)
+            errors.append({"email": a["email"], "error": str(exc)})
+    return {"sent": sent, "errors": errors, "date": summary["date"]}
+
+
+@api.get("/admin/eod-summary")
+async def admin_eod_summary(user: dict = Depends(require_roles("admin"))):
+    return await compute_eod_summary()
+
+
+@api.post("/admin/eod-email/send")
+async def admin_eod_email_send(user: dict = Depends(require_roles("admin"))):
+    return await send_eod_email_to_admins()
 
 
 # ---------------------------------------------------------------------------
@@ -2036,8 +2558,15 @@ async def seed_demo():
                 })
 
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # noqa: E402
+from apscheduler.triggers.cron import CronTrigger  # noqa: E402
+
+_scheduler: Optional[AsyncIOScheduler] = None
+
+
 @app.on_event("startup")
 async def on_startup():
+    global _scheduler
     try:
         await db.users.create_index("email", unique=True)
         await db.leads.create_index("stage")
@@ -2051,12 +2580,34 @@ async def on_startup():
         await db.activities.create_index("created_at")
         await db.proposals.create_index("lead_id")
         await db.whatsapp_templates.create_index("name")
+        await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+        await db.notifications.create_index([("role_scope", 1), ("created_at", -1)])
+        await db.notifications.create_index("dedupe_key")
     except Exception as e:
         log.warning(f"index setup: {e}")
     await seed_demo()
+
+    # Scheduler: EOD email at IST 18:00; notif refresh every 15 minutes
+    try:
+        eod_hour = int(os.environ.get("EOD_HOUR_IST", "18"))
+        eod_min = int(os.environ.get("EOD_MIN_IST", "0"))
+        _scheduler = AsyncIOScheduler(timezone=IST)
+        _scheduler.add_job(send_eod_email_to_admins, CronTrigger(hour=eod_hour, minute=eod_min), id="eod-email", replace_existing=True)
+        _scheduler.add_job(refresh_notifications, "interval", minutes=15, id="notif-refresh", replace_existing=True, next_run_time=now_utc() + timedelta(seconds=30))
+        _scheduler.start()
+        log.info("Scheduler started (EOD %02d:%02d IST, notif-refresh every 15m)", eod_hour, eod_min)
+    except Exception as e:
+        log.warning("Scheduler setup failed: %s", e)
+
     log.info("Tasko CRM startup complete.")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    global _scheduler
+    try:
+        if _scheduler:
+            _scheduler.shutdown(wait=False)
+    except Exception:
+        pass
     client.close()

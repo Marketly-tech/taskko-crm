@@ -10,6 +10,7 @@ import {
   Legend, Cell, PieChart, Pie,
 } from "recharts";
 import StarRating from "@/components/StarRating";
+import AdminEODSummary from "@/components/AdminEODSummary";
 import {
   TrendingUp, CalendarCheck2, BellRing, Users2, Phone, PhoneMissed,
   CalendarPlus, ListTodo, ArrowUpRight, Sparkles, Building2,
@@ -276,6 +277,7 @@ function MonthlyTab() {
 
 function ActionItemsTab() {
   const nav = useNavigate();
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   useEffect(() => { api.get("/dashboard/action-items").then((r) => setData(r.data)); }, []);
   if (!data) return <div className="text-forest/50 text-sm">Loading…</div>;
@@ -285,6 +287,7 @@ function ActionItemsTab() {
 
   return (
     <div className="space-y-6">
+      {user?.role === "admin" && <AdminEODSummary mode="card" />}
       <div className="flex items-baseline gap-3">
         <div className="label-caps">Overview</div>
         <div className="text-sm text-forest/60">· {today} · 12:00 AM – 11:59 PM</div>

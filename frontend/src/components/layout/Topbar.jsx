@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { Building2, Search } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import NotificationBell from "@/components/NotificationBell";
 
 const TITLES = {
   "/": "Overview",
@@ -81,6 +82,7 @@ export default function Topbar() {
               </Select>
             </>
           )}
+          <NotificationBell />
         </div>
       </div>
     </header>
