@@ -38,8 +38,9 @@ function LeadCreateDialog({ onCreated, users, projects, activeProjectId }) {
     setBusy(true);
     try {
       const body = { ...form };
-      if (!body.project_id) delete body.project_id;
-      if (!body.assigned_to) delete body.assigned_to;
+      ["project_id", "assigned_to", "email", "budget_min", "configuration", "notes"].forEach((k) => {
+        if (body[k] === "" || body[k] == null) delete body[k];
+      });
       if (body.budget_min) body.budget_min = Number(body.budget_min);
       const { data } = await api.post("/leads", body);
       toast.success(`Lead ${data.name} created`);

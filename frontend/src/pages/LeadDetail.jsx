@@ -202,7 +202,8 @@ export default function LeadDetail() {
               {STAGE_META.map((s) => (
                 <button
                   key={s.key}
-                  data-testid={`stage-btn-${s.key}`}
+                  data-testid={LEADS.stageBtn}
+                  data-stage={s.key}
                   onClick={() => changeStage(s.key)}
                   className={`text-xs font-medium h-9 rounded-sm border transition-colors duration-150 ${s.key === lead.stage ? "border-forest bg-forest text-white" : "border-[#E6E4DD] text-forest hover:border-forest"}`}
                 >
