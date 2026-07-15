@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
-  Legend,
+  Legend, Cell,
 } from "recharts";
 import StarRating from "@/components/StarRating";
 import {
@@ -116,7 +116,7 @@ function MonthlyTab() {
               <Tooltip contentStyle={{ border: "1px solid #E6E4DD", borderRadius: 4, fontSize: 12 }} formatter={(v, _n, item) => [v, STAGE_META.find((s) => s.key === item.payload.stage)?.label]} />
               <Bar dataKey="count" radius={[3, 3, 0, 0]}>
                 {data.pipeline.map((p, i) => (
-                  <rect key={i} fill={STAGE_META.find((s) => s.key === p.stage)?.tone || "#102A20"} />
+                  <Cell key={i} fill={STAGE_META.find((s) => s.key === p.stage)?.tone || "#102A20"} />
                 ))}
               </Bar>
             </BarChart>

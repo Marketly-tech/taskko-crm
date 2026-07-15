@@ -1176,8 +1176,8 @@ async def dashboard_monthly(user: dict = Depends(get_current_user)):
     prev_rev_docs = [r async for r in db.proposals.aggregate(prev_rev_pipe)]
     prev_revenue = prev_rev_docs[0]["total"] if prev_rev_docs else 0
 
-    total_leads_m = new_leads or 1
-    conversion = round((booked / total_leads_m) * 100, 2)
+    total_leads_m = new_leads
+    conversion = round((booked / total_leads_m) * 100, 2) if total_leads_m > 0 else 0.0
 
     revenue_pct = 0
     if prev_revenue > 0:

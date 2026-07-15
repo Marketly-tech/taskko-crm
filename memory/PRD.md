@@ -33,11 +33,21 @@ features.
   Projects, Inventory grid, Site Visits, Follow-ups, Team, Settings.
 - Custom Tasko design system: forest-green sidebar, warm bone canvas, Cabinet Grotesk + Manrope.
 
+## What's implemented — v1.1 (Feb 2026, iteration 2 – Paramantra parity + Console)
+- Dashboard rebuilt with two tabs: **Month's Updates** (KPIs, outreach telemetry line chart with 4 series, revenue vs last month, total-lead pipeline bar chart, Top Leads by stars, Recent Inquiries, Upcoming Closures) and **Action Items** (missed calls / today's follow-ups / scheduled calls / tasks widgets, Today's Follow-ups list with overdue tag, Planned Dates, Leads-with-no-call, Leads-with-no-follow-up).
+- Sidebar regrouped into **Workspace / Project / My Console**.
+- New Console pages: **Reports** (executive scorecard + source mix), **Data Import** (CSV → leads), **WhatsApp Templates** (approved templates + variables), **Bulk Lead Allocation** (filter + select-many + assign), **Channel Partners** (broker directory), **Proposals** (pipeline by status, drives monthly revenue KPI).
+- Leads: added **executive filter** and **project filter** in the filter bar; topbar project switcher is now scoped only to routes it actually affects (Projects/Inventory/Site Visits/Follow-ups) — Leads always shows across projects as requested.
+- Lead detail: 5-star **StarRating** widget wired to backend, plus **Log Call / Log SMS / Log Email** dialogs. Call log captures direction / disposition / duration / recording URL. Recording URLs render an inline **audio player + Download link** in the timeline.
+- Backend: new endpoints `/api/leads/{id}/log-call|log-sms|log-email`, `/api/leads/bulk-assign`, `/api/leads/import`, `/api/whatsapp-templates/*`, `/api/channel-partners/*`, `/api/proposals/*`, `/api/dashboard/monthly`, `/api/dashboard/action-items`, `/api/reports/executives`, `/api/reports/sources`. New collections: `whatsapp_templates`, `channel_partners`, `proposals`. Seed data extended: 4 templates, 3 partners, ~13 proposals, ~220 synthesized activities so telemetry chart is meaningful.
+- Calling API recommendation surfaced in Settings: **Exotel** (recommended India), **MyOperator** (India), **Twilio Voice** (global). All three post recording URLs to Tasko via webhook.
+
 ## MOCKED / deferred integrations
-- **WhatsApp** — UI toggles + send buttons present; outbound send is mocked (logs only).
-- **Resend Email** — same. UI templates ready; outbound send mocked.
-- **Google Calendar** — reminder toggle + ICS-style timestamps captured; no live OAuth yet.
-- Live integrations require Resend API key, Twilio SID/Token, Google OAuth client — deferred to v1.1.
+- **WhatsApp** — UI toggles + templates ready; outbound send mocked.
+- **Resend Email** — same.
+- **Google Calendar** — reminder toggle only.
+- **Calling providers (Exotel/MyOperator/Twilio)** — recording URL field accepts strings; live webhook receiver is the next wire-up.
+- Deferred (per user): Knowledge Base, Marketing Tools, Zone & Region Management, Geolocation Dashboard, Marketing Dashboard.
 
 ## Backlog (P0 → P2)
 - P0: Wire Resend + Twilio WhatsApp behind the mock (once keys supplied).
