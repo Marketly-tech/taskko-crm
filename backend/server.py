@@ -1,89 +1,1079 @@
-from fastapi import FastAPI, APIRouter
+"""Tasko Real Estate CRM - FastAPI backend.
+
+Single-file implementation for the MVP. Handles auth, projects, inventory,
+leads (with source webhooks), site visits, follow-ups, and analytics.
+"""
+
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from pathlib import Path
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
 import os
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+import secrets
 import uuid
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Literal
+
+import bcrypt
+import jwt
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, status, Query
+from starlette.middleware.cors import CORSMiddleware
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+# ---------------------------------------------------------------------------
+# Config & DB
+# ---------------------------------------------------------------------------
+MONGO_URL = os.environ["MONGO_URL"]
+DB_NAME = os.environ["DB_NAME"]
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
+JWT_ALGO = "HS256"
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@tasko.com")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
 
-# Create the main app without a prefix
-app = FastAPI()
+app = FastAPI(title="Tasko CRM API")
+api = APIRouter(prefix="/api")
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+log = logging.getLogger("tasko")
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+# ---------------------------------------------------------------------------
+# Utils
+# ---------------------------------------------------------------------------
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def create_token(user_id: str, email: str, role: str, kind: str = "access", ttl_min: int = 60 * 12) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "role": role,
+        "type": kind,
+        "exp": now_utc() + timedelta(minutes=ttl_min),
+        "iat": now_utc(),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
+
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+
+
+async def get_current_user(request: Request) -> dict:
+    token = request.cookies.get("access_token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "access":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await db.users.find_one({"id": payload["sub"]}, {"password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    user.pop("_id", None)
+    return user
+
+
+def require_roles(*roles: str):
+    async def dep(user: dict = Depends(get_current_user)) -> dict:
+        if user["role"] not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return dep
+
+
+def set_auth_cookies(resp: Response, user_id: str, email: str, role: str) -> None:
+    access = create_token(user_id, email, role, "access", ttl_min=60 * 12)
+    refresh = create_token(user_id, email, role, "refresh", ttl_min=60 * 24 * 7)
+    resp.set_cookie("access_token", access, httponly=True, secure=True, samesite="none", max_age=60 * 60 * 12, path="/")
+    resp.set_cookie("refresh_token", refresh, httponly=True, secure=True, samesite="none", max_age=60 * 60 * 24 * 7, path="/")
+
+
+def clean(doc: dict) -> dict:
+    if not doc:
+        return doc
+    doc.pop("_id", None)
+    doc.pop("password_hash", None)
+    return doc
+
+
+# ---------------------------------------------------------------------------
+# Models (pydantic schemas for requests / responses)
+# ---------------------------------------------------------------------------
+Role = Literal["admin", "manager", "executive"]
+LeadStage = Literal["new", "contacted", "qualified", "site_visit", "negotiation", "booked", "lost"]
+LeadSource = Literal["magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in", "manual"]
+UnitStatus = Literal["available", "held", "booked", "sold"]
+VisitStatus = Literal["scheduled", "completed", "no_show", "cancelled"]
+FollowUpStatus = Literal["pending", "done", "missed"]
+
+
+class BaseDoc(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class LoginBody(BaseDoc):
+    email: EmailStr
+    password: str
+
+
+class RegisterBody(BaseDoc):
+    email: EmailStr
+    password: str
+    name: str
+    role: Role = "executive"
+
+
+class UpdateUserBody(BaseDoc):
+    name: Optional[str] = None
+    role: Optional[Role] = None
+    phone: Optional[str] = None
+    active: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class ProjectBody(BaseDoc):
+    name: str
+    location: str
+    city: Optional[str] = None
+    rera: Optional[str] = None
+    price_min: Optional[float] = None
+    price_max: Optional[float] = None
+    configurations: Optional[List[str]] = None
+    cover: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = "active"
+
+
+class UnitBody(BaseDoc):
+    project_id: str
+    tower: str
+    floor: int
+    unit_no: str
+    config: str  # e.g. 2BHK
+    carpet_area: Optional[float] = None
+    price: Optional[float] = None
+    facing: Optional[str] = None
+    status: UnitStatus = "available"
+
+
+class LeadBody(BaseDoc):
+    name: str
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+    source: LeadSource = "manual"
+    project_id: Optional[str] = None
+    budget_min: Optional[float] = None
+    budget_max: Optional[float] = None
+    configuration: Optional[str] = None
+    location_pref: Optional[str] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    stage: LeadStage = "new"
+
+
+class UpdateLeadBody(BaseDoc):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+    source: Optional[LeadSource] = None
+    project_id: Optional[str] = None
+    budget_min: Optional[float] = None
+    budget_max: Optional[float] = None
+    configuration: Optional[str] = None
+    location_pref: Optional[str] = None
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+    stage: Optional[LeadStage] = None
+    lost_reason: Optional[str] = None
+    priority: Optional[Literal["hot", "warm", "cold"]] = None
+
+
+class AssignBody(BaseDoc):
+    user_id: str
+
+
+class StageBody(BaseDoc):
+    stage: LeadStage
+    note: Optional[str] = None
+
+
+class NoteBody(BaseDoc):
+    text: str
+    kind: Literal["note", "call", "whatsapp", "email"] = "note"
+
+
+class SiteVisitBody(BaseDoc):
+    lead_id: str
+    project_id: str
+    scheduled_at: datetime
+    assigned_to: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class UpdateSiteVisitBody(BaseDoc):
+    scheduled_at: Optional[datetime] = None
+    status: Optional[VisitStatus] = None
+    notes: Optional[str] = None
+    outcome: Optional[str] = None
+    assigned_to: Optional[str] = None
+
+
+class FollowUpBody(BaseDoc):
+    lead_id: str
+    due_at: datetime
+    kind: Literal["call", "whatsapp", "email", "meeting"] = "call"
+    notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+
+
+class UpdateFollowUpBody(BaseDoc):
+    due_at: Optional[datetime] = None
+    status: Optional[FollowUpStatus] = None
+    notes: Optional[str] = None
+
+
+class SettingsBody(BaseDoc):
+    whatsapp_enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+    google_calendar_enabled: Optional[bool] = None
+    whatsapp_number: Optional[str] = None
+    resend_from_email: Optional[str] = None
+    auto_assign_enabled: Optional[bool] = None
+    auto_followup_enabled: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# Activity helper
+# ---------------------------------------------------------------------------
+async def log_activity(lead_id: Optional[str], actor: dict, kind: str, message: str, meta: Optional[dict] = None) -> None:
+    doc = {
+        "id": new_id(),
+        "lead_id": lead_id,
+        "actor_id": actor.get("id") if actor else None,
+        "actor_name": actor.get("name") if actor else "system",
+        "kind": kind,
+        "message": message,
+        "meta": meta or {},
+        "created_at": now_utc().isoformat(),
+    }
+    await db.activities.insert_one(doc)
+
+
+# ---------------------------------------------------------------------------
+# AUTH
+# ---------------------------------------------------------------------------
+@api.post("/auth/login")
+async def login(body: LoginBody, response: Response):
+    email = body.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    if not user or not verify_password(body.password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.get("active") is False:
+        raise HTTPException(status_code=403, detail="Account is disabled")
+    set_auth_cookies(response, user["id"], user["email"], user["role"])
+    return clean(user)
+
+
+@api.post("/auth/logout")
+async def logout(response: Response):
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/")
+    return {"ok": True}
+
+
+@api.get("/auth/me")
+async def me(user: dict = Depends(get_current_user)):
+    return user
+
+
+@api.post("/auth/refresh")
+async def refresh(request: Request, response: Response):
+    tok = request.cookies.get("refresh_token")
+    if not tok:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    try:
+        payload = decode_token(tok)
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid token type")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+    user = await db.users.find_one({"id": payload["sub"]}, {"password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    set_auth_cookies(response, user["id"], user["email"], user["role"])
+    return clean(user)
+
+
+# ---------------------------------------------------------------------------
+# USERS / TEAM
+# ---------------------------------------------------------------------------
+@api.get("/users")
+async def list_users(user: dict = Depends(get_current_user)):
+    docs = await db.users.find({}, {"password_hash": 0, "_id": 0}).sort("created_at", -1).to_list(500)
+    return docs
+
+
+@api.post("/users")
+async def create_user(body: RegisterBody, actor: dict = Depends(require_roles("admin"))):
+    email = body.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    doc = {
+        "id": new_id(),
+        "email": email,
+        "name": body.name,
+        "role": body.role,
+        "password_hash": hash_password(body.password),
+        "active": True,
+        "created_at": now_utc().isoformat(),
+    }
+    await db.users.insert_one(doc)
+    return clean(doc)
+
+
+@api.patch("/users/{user_id}")
+async def update_user(user_id: str, body: UpdateUserBody, actor: dict = Depends(require_roles("admin"))):
+    update = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "password"}
+    if body.password:
+        update["password_hash"] = hash_password(body.password)
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    result = await db.users.update_one({"id": user_id}, {"$set": update})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    doc = await db.users.find_one({"id": user_id}, {"password_hash": 0, "_id": 0})
+    return doc
+
+
+@api.delete("/users/{user_id}")
+async def delete_user(user_id: str, actor: dict = Depends(require_roles("admin"))):
+    if user_id == actor["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    r = await db.users.delete_one({"id": user_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# PROJECTS
+# ---------------------------------------------------------------------------
+@api.get("/projects")
+async def list_projects(user: dict = Depends(get_current_user)):
+    docs = await db.projects.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # attach counts
+    for d in docs:
+        d["units_total"] = await db.units.count_documents({"project_id": d["id"]})
+        d["units_available"] = await db.units.count_documents({"project_id": d["id"], "status": "available"})
+        d["leads_count"] = await db.leads.count_documents({"project_id": d["id"]})
+    return docs
+
+
+@api.post("/projects")
+async def create_project(body: ProjectBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["created_at"] = now_utc().isoformat()
+    await db.projects.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/projects/{project_id}")
+async def update_project(project_id: str, body: ProjectBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    update = body.model_dump(exclude_none=True)
+    r = await db.projects.update_one({"id": project_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return await db.projects.find_one({"id": project_id}, {"_id": 0})
+
+
+@api.delete("/projects/{project_id}")
+async def delete_project(project_id: str, actor: dict = Depends(require_roles("admin"))):
+    await db.projects.delete_one({"id": project_id})
+    await db.units.delete_many({"project_id": project_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# INVENTORY / UNITS
+# ---------------------------------------------------------------------------
+@api.get("/units")
+async def list_units(project_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {}
+    if project_id:
+        q["project_id"] = project_id
+    docs = await db.units.find(q, {"_id": 0}).sort([("tower", 1), ("floor", 1), ("unit_no", 1)]).to_list(2000)
+    return docs
+
+
+@api.post("/units")
+async def create_unit(body: UnitBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["created_at"] = now_utc().isoformat()
+    await db.units.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/units/{unit_id}")
+async def update_unit(unit_id: str, body: dict, actor: dict = Depends(require_roles("admin", "manager"))):
+    allowed = {"status", "price", "carpet_area", "facing", "config", "tower", "floor", "unit_no"}
+    update = {k: v for k, v in body.items() if k in allowed}
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    r = await db.units.update_one({"id": unit_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    return await db.units.find_one({"id": unit_id}, {"_id": 0})
+
+
+@api.delete("/units/{unit_id}")
+async def delete_unit(unit_id: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    await db.units.delete_one({"id": unit_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# LEADS
+# ---------------------------------------------------------------------------
+async def _pick_auto_assignee() -> Optional[str]:
+    """Round-robin among executives that are active."""
+    execs = await db.users.find({"role": "executive", "active": {"$ne": False}}, {"id": 1, "_id": 0}).to_list(200)
+    if not execs:
+        return None
+    # pick executive with the fewest open (non-terminal) leads
+    counts = []
+    for e in execs:
+        c = await db.leads.count_documents({"assigned_to": e["id"], "stage": {"$nin": ["booked", "lost"]}})
+        counts.append((c, e["id"]))
+    counts.sort()
+    return counts[0][1]
+
+
+@api.get("/leads")
+async def list_leads(
+    project_id: Optional[str] = None,
+    stage: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    source: Optional[str] = None,
+    search: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    q: dict = {}
+    if project_id:
+        q["project_id"] = project_id
+    if stage:
+        q["stage"] = stage
+    if assigned_to:
+        q["assigned_to"] = assigned_to
+    if source:
+        q["source"] = source
+    if search:
+        q["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"phone": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+        ]
+    # executives only see their leads
+    if user["role"] == "executive":
+        q["assigned_to"] = user["id"]
+    docs = await db.leads.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return docs
+
+
+@api.get("/leads/{lead_id}")
+async def get_lead(lead_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if user["role"] == "executive" and doc.get("assigned_to") != user["id"]:
+        raise HTTPException(status_code=403, detail="Not your lead")
+    return doc
+
+
+@api.post("/leads")
+async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["created_at"] = now_utc().isoformat()
+    doc["updated_at"] = doc["created_at"]
+    doc.setdefault("priority", "warm")
+    if not doc.get("assigned_to"):
+        settings = await db.settings.find_one({"id": "singleton"}) or {}
+        if settings.get("auto_assign_enabled", True):
+            doc["assigned_to"] = await _pick_auto_assignee()
+    await db.leads.insert_one(doc)
+    doc.pop("_id", None)
+    await log_activity(doc["id"], actor, "lead_created", f"Lead created from {doc['source']}")
+    return doc
+
+
+@api.patch("/leads/{lead_id}")
+async def update_lead(lead_id: str, body: UpdateLeadBody, actor: dict = Depends(get_current_user)):
+    update = body.model_dump(exclude_none=True)
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    update["updated_at"] = now_utc().isoformat()
+    r = await db.leads.update_one({"id": lead_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if "stage" in update:
+        await log_activity(lead_id, actor, "stage_change", f"Stage moved to {update['stage']}")
+    if "assigned_to" in update:
+        await log_activity(lead_id, actor, "assignment", f"Assigned to user {update['assigned_to']}")
+    return await db.leads.find_one({"id": lead_id}, {"_id": 0})
+
+
+@api.post("/leads/{lead_id}/assign")
+async def assign_lead(lead_id: str, body: AssignBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    r = await db.leads.update_one(
+        {"id": lead_id},
+        {"$set": {"assigned_to": body.user_id, "updated_at": now_utc().isoformat()}},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    assignee = await db.users.find_one({"id": body.user_id}, {"name": 1, "_id": 0})
+    await log_activity(lead_id, actor, "assignment", f"Assigned to {assignee.get('name', body.user_id) if assignee else body.user_id}")
+    return await db.leads.find_one({"id": lead_id}, {"_id": 0})
+
+
+@api.post("/leads/{lead_id}/stage")
+async def move_stage(lead_id: str, body: StageBody, actor: dict = Depends(get_current_user)):
+    update = {"stage": body.stage, "updated_at": now_utc().isoformat()}
+    r = await db.leads.update_one({"id": lead_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await log_activity(lead_id, actor, "stage_change", f"Stage → {body.stage}" + (f": {body.note}" if body.note else ""))
+    return await db.leads.find_one({"id": lead_id}, {"_id": 0})
+
+
+@api.post("/leads/{lead_id}/notes")
+async def add_note(lead_id: str, body: NoteBody, actor: dict = Depends(get_current_user)):
+    await log_activity(lead_id, actor, body.kind, body.text)
+    return {"ok": True}
+
+
+@api.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    await db.leads.delete_one({"id": lead_id})
+    await db.activities.delete_many({"lead_id": lead_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# LEAD WEBHOOKS — generic receiver for external platforms
+# ---------------------------------------------------------------------------
+async def _ingest_lead_from_payload(source: str, payload: dict) -> dict:
+    """Normalize an incoming external lead payload into a lead document."""
+    name = payload.get("name") or payload.get("full_name") or payload.get("customer_name") or "Unknown"
+    phone = payload.get("phone") or payload.get("mobile") or payload.get("contact")
+    email = payload.get("email") or payload.get("customer_email")
+    project_name = payload.get("project") or payload.get("project_name")
+    project = None
+    if project_name:
+        project = await db.projects.find_one({"name": {"$regex": f"^{project_name}$", "$options": "i"}}, {"id": 1})
+    lead = {
+        "id": new_id(),
+        "name": name,
+        "phone": phone,
+        "email": email,
+        "source": source,
+        "project_id": project["id"] if project else None,
+        "budget_min": payload.get("budget_min"),
+        "budget_max": payload.get("budget_max"),
+        "configuration": payload.get("configuration") or payload.get("bhk"),
+        "location_pref": payload.get("location") or payload.get("locality"),
+        "notes": payload.get("message") or payload.get("notes"),
+        "stage": "new",
+        "priority": "warm",
+        "created_at": now_utc().isoformat(),
+        "updated_at": now_utc().isoformat(),
+    }
+    # auto-assign
+    settings = await db.settings.find_one({"id": "singleton"}) or {}
+    if settings.get("auto_assign_enabled", True):
+        lead["assigned_to"] = await _pick_auto_assignee()
+    await db.leads.insert_one(lead)
+    lead.pop("_id", None)
+    await log_activity(lead["id"], None, "lead_created", f"Auto-captured from {source}", {"raw": payload})
+    return lead
+
+
+@api.post("/webhooks/leads/{source}")
+async def webhook_leads(source: str, payload: dict):
+    """Public endpoint. External platforms POST here to push leads.
+
+    Accepts sources: magicbricks, 99acres, commonfloor, housing, website,
+    google_ads, facebook, instagram, referral, walk_in.
+    """
+    allowed = {"magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in"}
+    if source not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unknown source '{source}'")
+    lead = await _ingest_lead_from_payload(source, payload)
+    return {"ok": True, "lead_id": lead["id"]}
+
+
+# ---------------------------------------------------------------------------
+# SITE VISITS
+# ---------------------------------------------------------------------------
+@api.get("/site-visits")
+async def list_visits(project_id: Optional[str] = None, lead_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q: dict = {}
+    if project_id:
+        q["project_id"] = project_id
+    if lead_id:
+        q["lead_id"] = lead_id
+    if user["role"] == "executive":
+        q["assigned_to"] = user["id"]
+    docs = await db.site_visits.find(q, {"_id": 0}).sort("scheduled_at", 1).to_list(2000)
+    return docs
+
+
+@api.post("/site-visits")
+async def create_visit(body: SiteVisitBody, actor: dict = Depends(get_current_user)):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["status"] = "scheduled"
+    doc["scheduled_at"] = doc["scheduled_at"].astimezone(timezone.utc).isoformat()
+    doc["created_at"] = now_utc().isoformat()
+    if not doc.get("assigned_to"):
+        lead = await db.leads.find_one({"id": doc["lead_id"]}, {"assigned_to": 1})
+        doc["assigned_to"] = (lead or {}).get("assigned_to")
+    await db.site_visits.insert_one(doc)
+    doc.pop("_id", None)
+    # advance lead to site_visit stage
+    await db.leads.update_one({"id": doc["lead_id"]}, {"$set": {"stage": "site_visit", "updated_at": now_utc().isoformat()}})
+    await log_activity(doc["lead_id"], actor, "site_visit_scheduled", f"Site visit scheduled at {doc['scheduled_at']}")
+    return doc
+
+
+@api.patch("/site-visits/{visit_id}")
+async def update_visit(visit_id: str, body: UpdateSiteVisitBody, actor: dict = Depends(get_current_user)):
+    update = body.model_dump(exclude_none=True)
+    if "scheduled_at" in update and isinstance(update["scheduled_at"], datetime):
+        update["scheduled_at"] = update["scheduled_at"].astimezone(timezone.utc).isoformat()
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    r = await db.site_visits.update_one({"id": visit_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Site visit not found")
+    v = await db.site_visits.find_one({"id": visit_id}, {"_id": 0})
+    if "status" in update:
+        await log_activity(v["lead_id"], actor, "site_visit_" + update["status"], f"Site visit {update['status']}")
+    return v
+
+
+@api.delete("/site-visits/{visit_id}")
+async def delete_visit(visit_id: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    await db.site_visits.delete_one({"id": visit_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# FOLLOW-UPS
+# ---------------------------------------------------------------------------
+@api.get("/follow-ups")
+async def list_followups(lead_id: Optional[str] = None, status_q: Optional[str] = Query(None, alias="status"), user: dict = Depends(get_current_user)):
+    q: dict = {}
+    if lead_id:
+        q["lead_id"] = lead_id
+    if status_q:
+        q["status"] = status_q
+    if user["role"] == "executive":
+        q["assigned_to"] = user["id"]
+    docs = await db.follow_ups.find(q, {"_id": 0}).sort("due_at", 1).to_list(2000)
+    return docs
+
+
+@api.post("/follow-ups")
+async def create_followup(body: FollowUpBody, actor: dict = Depends(get_current_user)):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["status"] = "pending"
+    doc["due_at"] = doc["due_at"].astimezone(timezone.utc).isoformat()
+    doc["created_at"] = now_utc().isoformat()
+    if not doc.get("assigned_to"):
+        lead = await db.leads.find_one({"id": doc["lead_id"]}, {"assigned_to": 1})
+        doc["assigned_to"] = (lead or {}).get("assigned_to")
+    await db.follow_ups.insert_one(doc)
+    doc.pop("_id", None)
+    await log_activity(doc["lead_id"], actor, "followup_scheduled", f"Follow-up scheduled at {doc['due_at']}")
+    return doc
+
+
+@api.patch("/follow-ups/{fu_id}")
+async def update_followup(fu_id: str, body: UpdateFollowUpBody, actor: dict = Depends(get_current_user)):
+    update = body.model_dump(exclude_none=True)
+    if "due_at" in update and isinstance(update["due_at"], datetime):
+        update["due_at"] = update["due_at"].astimezone(timezone.utc).isoformat()
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    r = await db.follow_ups.update_one({"id": fu_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    return await db.follow_ups.find_one({"id": fu_id}, {"_id": 0})
+
+
+@api.delete("/follow-ups/{fu_id}")
+async def delete_followup(fu_id: str, actor: dict = Depends(get_current_user)):
+    await db.follow_ups.delete_one({"id": fu_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# ACTIVITIES / TIMELINE
+# ---------------------------------------------------------------------------
+@api.get("/activities")
+async def list_activities(lead_id: Optional[str] = None, limit: int = 50, user: dict = Depends(get_current_user)):
+    q = {"lead_id": lead_id} if lead_id else {}
+    docs = await db.activities.find(q, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    return docs
+
+
+# ---------------------------------------------------------------------------
+# ANALYTICS
+# ---------------------------------------------------------------------------
+@api.get("/analytics/summary")
+async def analytics_summary(project_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    match: dict = {}
+    if project_id:
+        match["project_id"] = project_id
+    if user["role"] == "executive":
+        match["assigned_to"] = user["id"]
+
+    total_leads = await db.leads.count_documents(match)
+
+    # stage funnel
+    stages = ["new", "contacted", "qualified", "site_visit", "negotiation", "booked", "lost"]
+    funnel = {}
+    for s in stages:
+        funnel[s] = await db.leads.count_documents({**match, "stage": s})
+
+    # source breakdown
+    pipeline = [{"$match": match}, {"$group": {"_id": "$source", "count": {"$sum": 1}}}]
+    sources = [{"source": r["_id"], "count": r["count"]} async for r in db.leads.aggregate(pipeline)]
+
+    # visits & follow-ups today
+    today_start = datetime.combine(now_utc().date(), datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+    today_end = datetime.combine(now_utc().date(), datetime.max.time()).replace(tzinfo=timezone.utc).isoformat()
+    visits_today = await db.site_visits.count_documents({"scheduled_at": {"$gte": today_start, "$lte": today_end}})
+    followups_pending = await db.follow_ups.count_documents({"status": "pending"})
+
+    # last 7d trend
+    trend = []
+    for i in range(6, -1, -1):
+        d = (now_utc() - timedelta(days=i)).date()
+        start = datetime.combine(d, datetime.min.time()).replace(tzinfo=timezone.utc).isoformat()
+        end = datetime.combine(d, datetime.max.time()).replace(tzinfo=timezone.utc).isoformat()
+        cnt = await db.leads.count_documents({**match, "created_at": {"$gte": start, "$lte": end}})
+        trend.append({"date": d.isoformat(), "leads": cnt})
+
+    # conversion
+    booked = funnel.get("booked", 0)
+    conversion = round((booked / total_leads * 100), 1) if total_leads else 0.0
+
+    return {
+        "total_leads": total_leads,
+        "conversion_rate": conversion,
+        "visits_today": visits_today,
+        "followups_pending": followups_pending,
+        "funnel": funnel,
+        "sources": sources,
+        "trend": trend,
+    }
+
+
+# ---------------------------------------------------------------------------
+# SETTINGS (integration toggles)
+# ---------------------------------------------------------------------------
+@api.get("/settings")
+async def get_settings(user: dict = Depends(get_current_user)):
+    s = await db.settings.find_one({"id": "singleton"}, {"_id": 0})
+    if not s:
+        s = {
+            "id": "singleton",
+            "whatsapp_enabled": False,
+            "email_enabled": False,
+            "google_calendar_enabled": False,
+            "whatsapp_number": "",
+            "resend_from_email": "",
+            "auto_assign_enabled": True,
+            "auto_followup_enabled": True,
+        }
+        await db.settings.insert_one(s.copy())
+    s.pop("_id", None)
+    return s
+
+
+@api.patch("/settings")
+async def update_settings(body: SettingsBody, actor: dict = Depends(require_roles("admin"))):
+    update = body.model_dump(exclude_none=True)
+    await db.settings.update_one({"id": "singleton"}, {"$set": update}, upsert=True)
+    s = await db.settings.find_one({"id": "singleton"}, {"_id": 0})
+    return s
+
+
+# ---------------------------------------------------------------------------
+# Mount router & CORS
+# ---------------------------------------------------------------------------
+app.include_router(api)
+
+
+@app.get("/api/")
 async def root():
-    return {"message": "Hello World"}
+    return {"service": "Tasko CRM", "version": "1.0.0"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
-app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Startup: indexes + admin seeding + demo data
+# ---------------------------------------------------------------------------
+DEMO_PROJECTS = [
+    {
+        "name": "Aurelia Heights",
+        "location": "Whitefield, Bengaluru",
+        "city": "Bengaluru",
+        "rera": "PRM/KA/RERA/1251/446/PR/220621/004512",
+        "price_min": 12500000,
+        "price_max": 32000000,
+        "configurations": ["2BHK", "3BHK", "4BHK"],
+        "cover": "https://images.pexels.com/photos/15577446/pexels-photo-15577446.jpeg",
+        "description": "A premium residential enclave with skyline views and 40+ amenities.",
+        "status": "active",
+    },
+    {
+        "name": "Meridian Bay",
+        "location": "Bandra West, Mumbai",
+        "city": "Mumbai",
+        "rera": "P51800009876",
+        "price_min": 45000000,
+        "price_max": 120000000,
+        "configurations": ["3BHK", "4BHK", "Penthouse"],
+        "cover": "https://images.pexels.com/photos/5323853/pexels-photo-5323853.jpeg",
+        "description": "Sea-facing luxury towers in the heart of Bandra.",
+        "status": "active",
+    },
+    {
+        "name": "Cedar Grove",
+        "location": "Sector 65, Gurugram",
+        "city": "Gurugram",
+        "rera": "RC/REP/HARERA/GGM/447/179/2023/45",
+        "price_min": 18000000,
+        "price_max": 48000000,
+        "configurations": ["3BHK", "4BHK"],
+        "cover": "https://images.unsplash.com/photo-1614595737476-42487331b8a1",
+        "description": "Low-density gated community with private gardens.",
+        "status": "active",
+    },
+]
+
+
+async def seed_demo():
+    # projects
+    existing = await db.projects.count_documents({})
+    if existing == 0:
+        for p in DEMO_PROJECTS:
+            doc = {**p, "id": new_id(), "created_at": now_utc().isoformat()}
+            await db.projects.insert_one(doc)
+
+    # units - one per project if none
+    if await db.units.count_documents({}) == 0:
+        projects = await db.projects.find({}, {"_id": 0}).to_list(10)
+        rnd = random.Random(42)
+        for p in projects:
+            configs = p.get("configurations") or ["2BHK", "3BHK"]
+            for tower in ["A", "B"]:
+                for floor in range(1, 9):
+                    for unit_idx in range(1, 5):
+                        cfg = configs[unit_idx % len(configs)]
+                        price_min = p.get("price_min") or 10000000
+                        price_max = p.get("price_max") or 30000000
+                        price = int(price_min + (price_max - price_min) * rnd.random())
+                        status_r = rnd.random()
+                        if status_r < 0.55:
+                            unit_status = "available"
+                        elif status_r < 0.75:
+                            unit_status = "held"
+                        elif status_r < 0.92:
+                            unit_status = "booked"
+                        else:
+                            unit_status = "sold"
+                        u = {
+                            "id": new_id(),
+                            "project_id": p["id"],
+                            "tower": tower,
+                            "floor": floor,
+                            "unit_no": f"{tower}-{floor:02d}0{unit_idx}",
+                            "config": cfg,
+                            "carpet_area": 900 + rnd.randint(0, 900),
+                            "price": price,
+                            "facing": rnd.choice(["East", "West", "North", "South", "NE", "SW"]),
+                            "status": unit_status,
+                            "created_at": now_utc().isoformat(),
+                        }
+                        await db.units.insert_one(u)
+
+    # users
+    if await db.users.count_documents({}) == 0:
+        seeds = [
+            {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "name": "Aditi Kapoor", "role": "admin"},
+            {"email": "manager@tasko.com", "password": "manager123", "name": "Rohan Mehra", "role": "manager"},
+            {"email": "priya@tasko.com", "password": "executive123", "name": "Priya Sharma", "role": "executive"},
+            {"email": "karan@tasko.com", "password": "executive123", "name": "Karan Malhotra", "role": "executive"},
+            {"email": "neha@tasko.com", "password": "executive123", "name": "Neha Iyer", "role": "executive"},
+        ]
+        for s in seeds:
+            await db.users.insert_one({
+                "id": new_id(),
+                "email": s["email"].lower(),
+                "name": s["name"],
+                "role": s["role"],
+                "phone": "",
+                "active": True,
+                "password_hash": hash_password(s["password"]),
+                "created_at": now_utc().isoformat(),
+            })
+    else:
+        # ensure admin password matches env
+        admin = await db.users.find_one({"email": ADMIN_EMAIL.lower()})
+        if admin and not verify_password(ADMIN_PASSWORD, admin.get("password_hash", "")):
+            await db.users.update_one({"email": ADMIN_EMAIL.lower()}, {"$set": {"password_hash": hash_password(ADMIN_PASSWORD)}})
+
+    # leads
+    if await db.leads.count_documents({}) == 0:
+        projects = await db.projects.find({}, {"_id": 0}).to_list(10)
+        execs = await db.users.find({"role": "executive"}, {"_id": 0}).to_list(10)
+        first_names = ["Aarav", "Ishaan", "Vihaan", "Ananya", "Diya", "Kabir", "Aditya", "Meera", "Zoya", "Rahul", "Sneha", "Aryan", "Nikhil", "Riya", "Sanya", "Pooja", "Vikas", "Aman", "Simran", "Kunal"]
+        last_names = ["Sharma", "Verma", "Gupta", "Kapoor", "Malhotra", "Sinha", "Iyer", "Rao", "Bose", "Chatterjee", "Reddy", "Nair"]
+        sources = ["magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in"]
+        stages = ["new", "contacted", "qualified", "site_visit", "negotiation", "booked", "lost"]
+        stage_weights = [0.25, 0.20, 0.15, 0.15, 0.10, 0.08, 0.07]
+        priorities = ["hot", "warm", "cold"]
+        configs = ["2BHK", "3BHK", "4BHK"]
+        rnd = random.Random(7)
+
+        for i in range(48):
+            fn = rnd.choice(first_names)
+            ln = rnd.choice(last_names)
+            proj = rnd.choice(projects) if projects else None
+            stage = rnd.choices(stages, weights=stage_weights, k=1)[0]
+            assignee = rnd.choice(execs) if execs else None
+            created = now_utc() - timedelta(days=rnd.randint(0, 20), hours=rnd.randint(0, 23))
+            budget_min = rnd.choice([5000000, 10000000, 15000000, 20000000, 30000000])
+            lead = {
+                "id": new_id(),
+                "name": f"{fn} {ln}",
+                "phone": f"+91 9{rnd.randint(100000000, 999999999)}",
+                "email": f"{fn.lower()}.{ln.lower()}@example.com",
+                "source": rnd.choice(sources),
+                "project_id": proj["id"] if proj else None,
+                "budget_min": budget_min,
+                "budget_max": budget_min + rnd.randint(1000000, 8000000),
+                "configuration": rnd.choice(configs),
+                "location_pref": (proj or {}).get("city", ""),
+                "notes": "",
+                "stage": stage,
+                "priority": rnd.choice(priorities),
+                "assigned_to": assignee["id"] if assignee else None,
+                "created_at": created.isoformat(),
+                "updated_at": created.isoformat(),
+            }
+            await db.leads.insert_one(lead)
+
+    # site visits & follow ups (a few)
+    if await db.site_visits.count_documents({}) == 0:
+        leads = await db.leads.find({"stage": {"$in": ["site_visit", "negotiation"]}}, {"_id": 0}).to_list(20)
+        rnd = random.Random(11)
+        for lead in leads[:12]:
+            scheduled = now_utc() + timedelta(days=rnd.randint(-2, 7), hours=rnd.randint(9, 18))
+            await db.site_visits.insert_one({
+                "id": new_id(),
+                "lead_id": lead["id"],
+                "project_id": lead.get("project_id"),
+                "scheduled_at": scheduled.isoformat(),
+                "assigned_to": lead.get("assigned_to"),
+                "status": "scheduled" if scheduled > now_utc() else rnd.choice(["completed", "no_show"]),
+                "notes": "",
+                "created_at": now_utc().isoformat(),
+            })
+
+    if await db.follow_ups.count_documents({}) == 0:
+        leads = await db.leads.find({"stage": {"$nin": ["booked", "lost"]}}, {"_id": 0}).to_list(30)
+        rnd = random.Random(13)
+        for lead in leads[:20]:
+            due = now_utc() + timedelta(hours=rnd.randint(-24, 96))
+            await db.follow_ups.insert_one({
+                "id": new_id(),
+                "lead_id": lead["id"],
+                "due_at": due.isoformat(),
+                "kind": rnd.choice(["call", "whatsapp", "email"]),
+                "notes": "",
+                "assigned_to": lead.get("assigned_to"),
+                "status": "pending",
+                "created_at": now_utc().isoformat(),
+            })
+
+
+@app.on_event("startup")
+async def on_startup():
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.leads.create_index("stage")
+        await db.leads.create_index("assigned_to")
+        await db.leads.create_index("project_id")
+        await db.units.create_index([("project_id", 1), ("tower", 1), ("floor", 1)])
+        await db.site_visits.create_index("scheduled_at")
+        await db.follow_ups.create_index("due_at")
+        await db.activities.create_index("lead_id")
+    except Exception as e:
+        log.warning(f"index setup: {e}")
+    await seed_demo()
+    log.info("Tasko CRM startup complete.")
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
+async def on_shutdown():
     client.close()

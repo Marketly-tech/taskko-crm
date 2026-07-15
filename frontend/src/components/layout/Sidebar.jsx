@@ -1,0 +1,98 @@
+import React from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  LayoutDashboard,
+  Users2,
+  Building2,
+  BedDouble,
+  CalendarClock,
+  BellRing,
+  UserCog,
+  Settings as SettingsIcon,
+  LogOut,
+} from "lucide-react";
+import { NAV } from "@/constants/testIds";
+
+const ITEMS = [
+  { to: "/", label: "Overview", icon: LayoutDashboard, testId: NAV.itemDashboard, end: true },
+  { to: "/leads", label: "Leads", icon: Users2, testId: NAV.itemLeads },
+  { to: "/projects", label: "Projects", icon: Building2, testId: NAV.itemProjects },
+  { to: "/inventory", label: "Inventory", icon: BedDouble, testId: NAV.itemInventory },
+  { to: "/site-visits", label: "Site Visits", icon: CalendarClock, testId: NAV.itemVisits },
+  { to: "/follow-ups", label: "Follow-ups", icon: BellRing, testId: NAV.itemFollowups },
+  { to: "/team", label: "Team", icon: UserCog, testId: NAV.itemTeam, adminOnly: true },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, testId: NAV.itemSettings, adminOnly: true },
+];
+
+export default function Sidebar() {
+  const { user, logout } = useAuth();
+  const location = useLocation();
+  const isAdmin = user?.role === "admin";
+
+  return (
+    <aside
+      data-testid={NAV.sidebar}
+      className="grain relative flex flex-col w-[248px] shrink-0 bg-forest text-white min-h-screen"
+    >
+      <div className="relative z-10 px-6 pt-8 pb-10">
+        <div className="flex items-center gap-2.5">
+          <div className="h-8 w-8 rounded-sm bg-wheat text-forest grid place-items-center font-display font-black">
+            T
+          </div>
+          <div>
+            <div className="font-display font-black text-xl tracking-tight leading-none">Tasko</div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-white/50 mt-1">Real Estate CRM</div>
+          </div>
+        </div>
+      </div>
+
+      <nav className="relative z-10 flex-1 px-3 space-y-0.5">
+        <div className="px-3 pb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">Workspace</div>
+        {ITEMS.filter((i) => !i.adminOnly || isAdmin).map((i) => {
+          const Icon = i.icon;
+          return (
+            <NavLink
+              key={i.to}
+              to={i.to}
+              end={i.end}
+              data-testid={i.testId}
+              className={({ isActive }) =>
+                `group flex items-center gap-3 px-3 py-2.5 text-sm rounded-sm transition-colors duration-150 ${
+                  isActive
+                    ? "bg-white/10 text-white"
+                    : "text-white/70 hover:text-white hover:bg-white/5"
+                }`
+              }
+            >
+              <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
+              <span className="font-medium tracking-tight">{i.label}</span>
+            </NavLink>
+          );
+        })}
+      </nav>
+
+      <div className="relative z-10 border-t border-white/10 mx-3 my-4" />
+
+      <div className="relative z-10 px-4 pb-6">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-sm bg-white/10 grid place-items-center text-sm font-display font-bold">
+            {(user?.name || "?").slice(0, 1).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold truncate">{user?.name}</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{user?.role}</div>
+          </div>
+          <button
+            data-testid={NAV ? "auth-logout-btn" : ""}
+            onClick={logout}
+            className="p-1.5 rounded-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors duration-150"
+            title="Log out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}

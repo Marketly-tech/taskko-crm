@@ -1,0 +1,39 @@
+{
+  "summary": "Comprehensive backend + frontend testing of Tasko real-estate CRM. Backend: 30/30 pytest cases pass covering auth (cookie JWT), RBAC (admin/manager/executive), projects, units, leads (CRUD + stage + assign + notes + auto-assign + exec scoping), public webhooks (magicbricks/facebook/google_ads/unknown), site visits, follow-ups, activities, analytics summary, and settings. Frontend: login page, quick-role prefill, dashboard KPIs + charts + funnel, project switcher (3 seeded), leads Kanban with 7 columns + list toggle + new-lead dialog, projects page (3 cards + cover images), inventory (64 unit cells), site visits (4 rows), follow-ups (20 rows), team (6 members, admin only), settings (admin only), lead detail page, and RBAC: executive login correctly hides Team + Settings nav items.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/leads", "issue": "When frontend sends `email: \"\"` (empty string), Pydantic EmailStr validation returns 422. Same for `budget_min: \"\"` (float_parsing). Root cause is a frontend bug (not stripping empty strings), but backend could also accept empty string → None for EmailStr for a friendlier contract."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Leads.jsx › LeadCreateDialog.submit", "issue": "Sends `email: ''` and `budget_min: ''` to POST /api/leads when the corresponding fields are left blank, causing a 422 from the backend. Only `project_id` and `assigned_to` empty-strings are stripped. Fix: also strip/omit `email`, `budget_min`, `configuration`, `notes` when empty, or coerce empty budget_min to null.", "selector": "[data-testid='leads-create-submit']", "priority": "HIGH"},
+      {"component": "LeadDetail.jsx", "issue": "The stage-move buttons (New/Contacted/Qualified/…/Lost) do not have the `data-testid=\"lead-stage-btn\"` that is defined in constants/testIds.js (LEADS.stageBtn). Add data-testid so automated tests can assert stage transitions.", "selector": "[data-testid='lead-stage-btn']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (initial render)", "issues": ["Recharts container prints repeated console warnings: `The width(-1) and height(-1) of chart should be greater than 0`. Cosmetic – during first paint before the ResponsiveContainer measures. Consider setting a minHeight on the wrapper to silence."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Fix Leads.jsx LeadCreateDialog.submit to omit empty string fields (email, budget_min) before POST /api/leads – currently produces 422 (visible as toast) when creating a lead without email/budget.",
+    "Add `data-testid={LEADS.stageBtn}` to stage-move buttons on LeadDetail page.",
+    "(Optional cosmetic) Give Dashboard chart wrappers a minHeight to remove Recharts width/height warnings on first paint."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1080 lines – for maintainability consider splitting into routers (auth, leads, projects, inventory, visits, followups, analytics, settings) plus a seed module.",
+    "GET /api/users is open to any authenticated user; may need role-based masking of email/phone in the future for privacy.",
+    "GET /api/projects issues N (per-project) count queries – acceptable at 3 projects but should be aggregated for scale.",
+    "webhooks are unauthenticated – expected per spec, but no signature/secret verification; document as v1 acceptable but recommend HMAC secret per source before production."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "test_credentials": "admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123 – all verified working.",
+  "seed_data_creation": "None – used auto-seeded data (3 projects, 5 users, 48 leads, ~192 units, ~12 visits, ~20 follow-ups). Tests create + clean up their own TEST_ prefixed docs.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend fully green. The only real user-facing bug is the lead-create-dialog 422 when email or budget is blank – reproduce by opening Leads → New Lead, filling only name + phone, submitting: you'll see a Sonner error toast and a 422 in devtools. All 8 nav pages render; RBAC (exec sees only own leads, hides Team/Settings) verified. Kanban drag-and-drop was not exercised via Playwright (recommendation per prompt) – the underlying /api/leads/{id}/stage endpoint is confirmed working via pytest.",
+  "rca_of_the_issue": "Bug: 422 on POST /api/leads from the UI. RCA: In /app/frontend/src/pages/Leads.jsx (LeadCreateDialog.submit, ~line 40) the code only strips `project_id` and `assigned_to` when empty. `email` remains an empty string, which fails Pydantic's `EmailStr` (needs @-sign) and `budget_min` remains '' which fails float parsing. Reproduction: Login as admin → Leads → New lead → enter Name + Phone only → Create. Mitigation: `for (const k of ['email','budget_min','configuration','notes','assigned_to','project_id']) if (!body[k]) delete body[k]; if (body.budget_min) body.budget_min = Number(body.budget_min);`"
+}
