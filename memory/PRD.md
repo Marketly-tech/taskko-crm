@@ -1,66 +1,38 @@
-# Tasko - Real Estate Pre-sales CRM (PRD)
+# Tasko Real Estate CRM — PRD
 
-## Problem statement
-Build a real-estate CRM inspired by paramantra.com with a superior UI, called **Tasko**.
-Auto capture leads from MagicBricks/99acres/CommonFloor/Google Ads/social media,
-auto & manual assignment to team, admin/manager/executive RBAC, sales funnel with
-WhatsApp + Email nudges (Resend), auto follow-ups on missed calls / scheduled site
-visits with Google Calendar + WhatsApp reminders, multi-project toggle, inventory
-management (project-wise units), site visit management, plus Paramantra-inspired
-features.
-
-## User personas
-- **Admin** — org owner: manages team, projects, integrations, sees everything.
-- **Manager** — assigns/reassigns leads, monitors funnel, manages inventory.
-- **Executive (Sales)** — works assigned leads only, logs calls/visits/notes.
+## Original problem statement
+Build "Tasko", a Paramantra-inspired real estate CRM with lead capture from external portals (MagicBricks, CommonFloor, Google Ads, Meta), auto/manual assignment, role-based access (Admin, Manager, Executive), sales funnel, WhatsApp + Email (Resend), auto follow-ups, project inventory management, site visit management, notifications, Admin EOD summary + email report.
 
 ## Core requirements
-- JWT (cookie-based) auth with three roles.
-- Multi-project workspace with a top-bar project switcher.
-- Lead pipeline stages: new → contacted → qualified → site_visit → negotiation → booked / lost.
-- Auto lead assignment (least-loaded executive) + manual override.
-- Inventory grid per project (tower × floor × unit with status colouring).
-- Site visit calendar/list + follow-up task list.
-- Activity timeline per lead (auto + manual notes).
-- Analytics dashboard (KPIs, funnel, source mix, 7-day trend).
-- Public webhook receivers per source for external ingestion.
-- Settings screen for integration toggles (WhatsApp / Resend / Google Calendar).
+- React + FastAPI + MongoDB
+- JWT (cookie) auth, RBAC (admin/manager/executive)
+- Lead webhooks (public) for aggregator portals
+- Twilio click-to-call with recordings
+- Resend email
+- APScheduler (daily 18:00 IST EOD email)
 
-## What's implemented — v1.0 (Feb 2026)
-- Backend (FastAPI, single file `server.py`) with all CRUD + analytics + webhooks.
-- Seed data: 3 projects, ~130 units, 5 users, ~48 leads across stages, site visits & follow-ups.
-- Frontend (React + shadcn) with Login, Dashboard, Leads (list + kanban), Lead detail,
-  Projects, Inventory grid, Site Visits, Follow-ups, Team, Settings.
-- Custom Tasko design system: forest-green sidebar, warm bone canvas, Cabinet Grotesk + Manrope.
+## Implemented so far
+- **Iteration 1–4** (prior sessions): Auth+RBAC, Leads (Kanban+List+CRUD+CSV), Projects+Inventory (CSV import/export), Site Visits, Follow-ups, WhatsApp templates, Channel Partners, Proposals, Reports, Dashboard (Month's Updates + Action Items + revenue drill-down), Twilio Voice (executive-first bridged calling + recording + missed-call auto-followup).
+- **Iteration 5 (this session)**:
+  - In-app notifications collection + endpoints (`GET /api/notifications`, `POST /api/notifications/{id}/read`, `POST /api/notifications/read-all`, `POST /api/notifications/refresh`).
+  - Role-scoped notifications: agents get personal (lead_assigned, followup_due, sitevisit_reminder, missed_call); managers get team aggregates (team_overdue, stale_lead, negotiation_pending, exec_no_activity); admins inherit manager scope.
+  - Notification bell in Topbar with unread badge, dropdown, mark-all.
+  - Admin EOD summary card in Dashboard's Action Items tab + auto-modal after 18:00 local (per browser).
+  - EOD email via Resend HTML template + APScheduler cron (18:00 IST daily).
+  - Manual "Send now" button on EOD card + `/api/admin/eod-email/send` endpoint.
 
-## What's implemented — v1.1 (Feb 2026, iteration 2 – Paramantra parity + Console)
-- Dashboard rebuilt with two tabs: **Month's Updates** (KPIs, outreach telemetry line chart with 4 series, revenue vs last month, total-lead pipeline bar chart, Top Leads by stars, Recent Inquiries, Upcoming Closures) and **Action Items** (missed calls / today's follow-ups / scheduled calls / tasks widgets, Today's Follow-ups list with overdue tag, Planned Dates, Leads-with-no-call, Leads-with-no-follow-up).
-- Sidebar regrouped into **Workspace / Project / My Console**.
-- New Console pages: **Reports** (executive scorecard + source mix), **Data Import** (CSV → leads), **WhatsApp Templates** (approved templates + variables), **Bulk Lead Allocation** (filter + select-many + assign), **Channel Partners** (broker directory), **Proposals** (pipeline by status, drives monthly revenue KPI).
-- Leads: added **executive filter** and **project filter** in the filter bar; topbar project switcher is now scoped only to routes it actually affects (Projects/Inventory/Site Visits/Follow-ups) — Leads always shows across projects as requested.
-- Lead detail: 5-star **StarRating** widget wired to backend, plus **Log Call / Log SMS / Log Email** dialogs. Call log captures direction / disposition / duration / recording URL. Recording URLs render an inline **audio player + Download link** in the timeline.
-- Backend: new endpoints `/api/leads/{id}/log-call|log-sms|log-email`, `/api/leads/bulk-assign`, `/api/leads/import`, `/api/whatsapp-templates/*`, `/api/channel-partners/*`, `/api/proposals/*`, `/api/dashboard/monthly`, `/api/dashboard/action-items`, `/api/reports/executives`, `/api/reports/sources`. New collections: `whatsapp_templates`, `channel_partners`, `proposals`. Seed data extended: 4 templates, 3 partners, ~13 proposals, ~220 synthesized activities so telemetry chart is meaningful.
-- Calling API recommendation surfaced in Settings: **Exotel** (recommended India), **MyOperator** (India), **Twilio Voice** (global). All three post recording URLs to Tasko via webhook.
+## Prioritized backlog (P0/P1/P2)
+- P2 · Auto-Dialer (parked)
+- P2 · Knowledge base, marketing tools, zone/regions, geolocation dashboard
+- P1 · Verify Resend domain (currently testing mode — sends to non-verified admin emails return in errors[])
+- P1 · Twilio production keys / lift-off
+- P2 · WhatsApp Business API integration (currently template-only)
+- P2 · Google Calendar sync for site visits (toggle exists, real integration pending)
 
-## What's implemented — v1.2 (Feb 2026, iteration 3 – Twilio Voice REST)
-- **Twilio Voice REST** integrated for click-to-call with executive-first bridging. Executive clicks the *Call* button on a lead → Twilio rings the executive's phone → on answer, Twilio dials the lead and records the conversation → status + recording URL webhook back to Tasko.
-- New endpoints: `POST /api/leads/{id}/call`, `GET/POST /api/twilio/twiml/{lead_id}` (public), `POST /api/twilio/status-callback` (signed), `POST /api/twilio/recording-callback` (signed), `GET /api/twilio/status`.
-- Signature validation rebuilt against `BACKEND_PUBLIC_URL` so real Twilio webhooks (which sign the public URL) validate correctly behind ingress.
-- **Auto-call on new lead assignment**: Settings toggle that fires a Twilio bridge as soon as a lead is created (via manual form OR external webhook receiver).
-- **Missed-call follow-up policy**: 8 delay options — 15m / 1h / 2h / 4h / 8h / 1d default / 2d / 3d. Toggleable.
-- **Phone management**: `PATCH /api/users/me` for self-service, Team-page inline phone edit for admins, Sidebar "My profile" modal for everyone.
-- Auto-dialer / predictive calling **deferred**.
-- **WhatsApp** — UI toggles + templates ready; outbound send mocked.
-- **Resend Email** — same.
-- **Google Calendar** — reminder toggle only.
-- **Calling providers (Exotel/MyOperator/Twilio)** — recording URL field accepts strings; live webhook receiver is the next wire-up.
-- Deferred (per user): Knowledge Base, Marketing Tools, Zone & Region Management, Geolocation Dashboard, Marketing Dashboard.
+## Notes / gotchas
+- Resend testing-mode requires `SENDER_EMAIL` to be an address on a verified domain; otherwise the API rejects non-verified recipients. Update `/app/backend/.env` when domain is verified.
+- Scheduler is registered in FastAPI startup — restart backend to reload cron.
+- EOD modal uses localStorage `tasko-eod-shown-YYYY-MM-DD` to gate once per day.
 
-## Backlog (P0 → P2)
-- P0: Wire Resend + Twilio WhatsApp behind the mock (once keys supplied).
-- P0: Google Calendar OAuth + event push for site visits.
-- P1: Bulk lead import (CSV/Excel).
-- P1: Advanced reports (per-executive scorecards, lost-reason analysis).
-- P1: Notification centre (in-app + email digest).
-- P2: Mobile app / PWA polish.
-- P2: Marketing landing page for Tasko brand.
+## Test credentials
+See `/app/memory/test_credentials.md`.

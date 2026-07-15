@@ -131,8 +131,11 @@ export default function AdminEODSummary({ mode = "card" }) {
     setSending(true);
     try {
       const r = await api.post("/admin/eod-email/send");
+      const errs = r.data?.errors || [];
       if (r.data.sent > 0) {
         toast.success(`EOD report emailed to ${r.data.sent} admin${r.data.sent !== 1 ? "s" : ""}.`);
+      } else if (errs.length > 0) {
+        toast.error(`Email failed for ${errs.length} admin${errs.length !== 1 ? "s" : ""}: ${errs[0].error?.slice(0, 160) || "unknown error"}`);
       } else {
         toast.warning("No admin recipients found.");
       }
