@@ -1,0 +1,150 @@
+{
+  "theme": "Light theme, architectural and spacious, with a deep 'forest green' dark sidebar for a premium, grounded real estate aesthetic.",
+  "typography": {
+    "headings": {
+      "font": "Cabinet Grotesk",
+      "style": "Confident, wide, strong architectural structure",
+      "weight": "font-bold to font-black",
+      "tracking": "tracking-tight"
+    },
+    "body": {
+      "font": "Manrope",
+      "style": "Highly legible for data density, modern geometric",
+      "weight": "font-normal to font-medium",
+      "tracking": "tracking-normal"
+    },
+    "labels": {
+      "font": "Manrope",
+      "style": "Uppercase, highly tracked",
+      "weight": "font-bold",
+      "tracking": "tracking-[0.15em]",
+      "size": "text-xs"
+    }
+  },
+  "colors": {
+    "background": {
+      "primary": "#F9F8F6",
+      "secondary": "#FFFFFF"
+    },
+    "surface": {
+      "card": "#FFFFFF",
+      "sidebar": "#102A20",
+      "header": "#FFFFFF"
+    },
+    "brand": {
+      "primary": "#102A20",
+      "secondary": "#D4A373",
+      "accent": "#C25934"
+    },
+    "text": {
+      "primary": "#1F2421",
+      "secondary": "#5C6661",
+      "on_dark": "#FFFFFF",
+      "on_dark_muted": "#8A9A92"
+    },
+    "border": {
+      "default": "#E6E4DD",
+      "focus": "#102A20"
+    },
+    "status": {
+      "success": "#2D6A4F",
+      "warning": "#E9C46A",
+      "error": "#E07A5F",
+      "info": "#457B9D"
+    }
+  },
+  "spacing_and_layout": {
+    "dashboard_grid": "Bento style, dense but organized. grid-cols-1 md:grid-cols-4 lg:grid-cols-12 gap-6.",
+    "padding": "Generous on containers (p-6 to p-8), tighter on inner cards (p-4 to p-5)",
+    "borders": "Exposed grids for data-heavy sections. 1px solid borders for structure.",
+    "radius": "Minimal rounded edges. rounded-sm (2px) to rounded-md (6px) max. Avoid large bubbly corners.",
+    "sidebar": "Fixed width 260px, dark theme (#102A20) to anchor the UI. Solid background, no transparency."
+  },
+  "components": {
+    "kanban": "Subtle column backgrounds (#F1EFEA), white task cards with 1px border. Strict column borders.",
+    "inventory_grid": "Matrix layout mimicking a building's structure. Tight squares for units. Green=Available, Red=Booked, Grey=Held.",
+    "cards": "Flat, 1px border (#E6E4DD), no shadow by default. Hover adds shadow-sm and slightly darkens border.",
+    "buttons": "Sharp corners or rounded-sm. Primary button: bg-[#102A20] text-white hover:bg-[#1A362D]. Secondary: border border-[#102A20] text-[#102A20].",
+    "inputs": "Shadcn defaults modified. border-[#E6E4DD] bg-transparent focus:ring-1 focus:ring-[#102A20].",
+    "badges": "For lead sources. Flat rectangular badges, no pill shape unless strictly needed."
+  },
+  "motion_and_interactions": {
+    "hover_states": "Buttons and links must explicitly change color/opacity.",
+    "transitions": "Use specific transition classes (e.g., transition-colors duration-200), NEVER transition-all.",
+    "loading": "Skeleton loaders matching the data grid shapes."
+  },
+  "visual_enhancers": {
+    "shadows": "Minimal. Ambient drop shadows only on hovering cards or dropdown menus.",
+    "textures": "Subtle grain on the dark sidebar or large hero areas.",
+    "glassmorphism": "Not recommended for data CRM. Stick to solid, opaque backgrounds for maximum data clarity."
+  },
+  "accessibility": {
+    "contrast": "Ensure 4.5:1 ratio. Dark green text on white/bone backgrounds.",
+    "focus": "Clear focus rings around inputs.",
+    "testing": "All interactive elements MUST have data-testid attributes."
+  },
+  "media": {
+    "image_usage": "Projects use architectural exteriors. Leads/Team use executive portraits. Units use luxury interiors.",
+    "image_urls": {
+      "project_covers": [
+        {
+          "url": "https://images.pexels.com/photos/15577446/pexels-photo-15577446.jpeg",
+          "description": "Contemporary building glass facade"
+        },
+        {
+          "url": "https://images.pexels.com/photos/5323853/pexels-photo-5323853.jpeg",
+          "description": "Contemporary business center exterior"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1614595737476-42487331b8a1",
+          "description": "Gray concrete building"
+        }
+      ],
+      "team_avatars": [
+        {
+          "url": "https://images.unsplash.com/photo-1560250097-0b93528c311a",
+          "description": "Male executive portrait"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2",
+          "description": "Female executive portrait"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1718209881007-c0ecdfc00f9d",
+          "description": "Male executive in suit"
+        }
+      ],
+      "unit_interiors": [
+        {
+          "url": "https://images.pexels.com/photos/8082227/pexels-photo-8082227.jpeg",
+          "description": "Spacious elegant apartment"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1738168246881-40f35f8aba0a",
+          "description": "Living room with large couch"
+        }
+      ]
+    }
+  },
+  "instructions_to_main_agent": [
+    "Do NOT use 'Inter', 'Roboto', or generic fonts. Import 'Cabinet Grotesk' for Headings and 'Manrope' for body.",
+    "Avoid purple/violet completely. The app must feel architectural, professional, and confident.",
+    "Implement the Layout with a fixed Sidebar (Dark green) and a main content area (Warm Bone/Off-white).",
+    "Use Shadcn UI components but strip away the generic rounded 'Vercel' look; use tight corner radiuses (rounded-sm) and flat colors.",
+    "Add 'data-testid' to all buttons, inputs, tabs, and clickable elements.",
+    "For the Kanban and Inventory Grid, prioritize density and clear strict borders.",
+    "Always ensure a proper visual hierarchy in data tables: uppercase headers, subtle borders, highlight the primary column."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "You MUST NOT apply universal transition. Eg: transition: all. Always add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "NEVER: use AI assistant Emoji characters like \ud83e\udd16\ud83e\udde0\ud83d\udcad\ud83d\udca1\ud83d\udd2e\ud83c\udfaf etc for icons. Use Phosphor or Lucide icons.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use `sonner` for toasts."
+  ]
+}
