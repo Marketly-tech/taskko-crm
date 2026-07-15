@@ -1,0 +1,51 @@
+{
+  "summary": "Iteration 3 — Twilio Voice REST integration end-to-end tested. Backend: 26/26 pytest cases pass in /app/backend/tests/backend_test_v3.py covering GET /twilio/status (auth + configured=true + from=+15342044495 + webhook=preview URL), PATCH /users/me (admin+exec self-service phone), PATCH /users/{id} admin-only vs exec 403, POST /leads/{id}/call (400 no-exec-phone, 400 no-lead-phone, 403 not-owner, 502/200 Twilio real attempt with no activity created on error), GET+POST /twilio/twiml/{id} (Say+Dial+lead phone; no-dial when phone missing), unsigned status/recording callbacks → 403 (both public and localhost), signed status-callback (localhost) → 200 with activity mutation missed_call + auto follow-up row inserted with 'Auto-scheduled', signed recording-callback → activity meta.recording_url ends in .mp3 + recording_sid + duration=42, auto-call on POST /leads and POST /webhooks/leads/magicbricks (lead creation succeeds even on Twilio error), settings roundtrip (auto_call_on_new_lead / missed_call_followup_enabled / missed_call_followup_hours), plus regression spot-checks (login + dashboard/monthly + list leads). Frontend Playwright: Team page shows PHONE column with inline Edit (team-phone-edit-* → input → save works, +15005550006 saved), Sidebar sidebar-profile-btn opens 'My profile' with profile-phone-input + profile-save-btn (admin AND executive priya@tasko.com), Settings page renders 'Twilio calling' card with 'LIVE' badge, Caller ID +15342044495 and Webhook base https://tasko-crm.preview.emergentagent.com; settings-toggle-autocall + settings-toggle-missed-followup + settings-missed-hours (4 hours) + settings-save-btn saves (toast 'Settings saved'), LeadDetail lead-twilio-call-btn is confirmed as index 0 of 4 action buttons and clicking it fires POST /leads/{id}/call which returns 502 (Twilio error path).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /twilio/status-callback  |  POST /twilio/recording-callback", "issue": "Twilio signature is validated against str(request.url) which — because uvicorn is started without --proxy-headers/--forwarded-allow-ips — resolves to the INTERNAL 'http://localhost:8001/...' URL, not the PUBLIC 'https://tasko-crm.preview.emergentagent.com/...' URL that Twilio signs against.  Real Twilio webhook posts (which sign the public URL) will therefore always 403.  Fix: either (a) run uvicorn with '--proxy-headers --forwarded-allow-ips=*' AND ensure ingress sends X-Forwarded-Proto/Host, OR (b) validate against a hand-built URL like f'{BACKEND_PUBLIC_URL}{request.url.path}' inside _twilio_verify. Verified locally: signed POST to http://localhost:8001/... works (200); signed POST to https://tasko-crm.preview.emergentagent.com/... returns 403."},
+      {"endpoint": "POST /leads/{lead_id}/call", "issue": "Twilio failures are surfaced as HTTPException 502.  The Cloudflare / preview gateway intercepts origin 5xx and replaces the JSON body with its own HTML error page (<title>preview.emergentagent.com | 502: Bad gateway</title>).  Result: the frontend receives HTML instead of {'detail':'Twilio error: …'}, the toast body ends up empty (verified — Call button click showed NO toast), and the user gets no feedback that the call failed.  Fix suggestion: return HTTP 400 or 200 with {'ok':false,'error':'…'} for Twilio API failures instead of 502, and let the client render the error."},
+      {"endpoint": "GET /twilio/twiml/{lead_id}", "issue": "This endpoint is public (no auth) and exposes lead phone numbers in the returned <Dial><Number>…</Number></Dial> to anyone who guesses a lead_id.  Twilio itself is the only intended caller.  Consider signing/validating Twilio requests on this endpoint too (currently only status/recording callbacks are validated)."},
+      {"endpoint": "PATCH /users/{id}", "issue": "The self-service PATCH /users/me only accepts name, phone, password (UpdateSelfBody).  If an executive uses PATCH /users/{their_own_id} the endpoint requires require_roles('admin') and 403s — which is fine per the spec, but the UX suggestion is to allow /users/{id} for the caller's own id so a single client codepath works."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "LeadDetail — lead-twilio-call-btn", "issue": "On Twilio error (502 upstream) the toast is EMPTY (verified — clicked, waited 5s, no toast text). Root cause = backend returning 502 which is intercepted by the preview gateway and rewritten to HTML, so formatApiError(e.response?.data?.detail) receives a huge HTML blob (or undefined) and renders nothing. See backend minor issue 2 above.", "selector": "[data-testid=\"lead-twilio-call-btn\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Twilio status-callback / recording-callback (real Twilio → app)", "issue": "Real Twilio webhooks will always 403 in the current deploy because signature validation uses the internal request URL. Verified via signed POST to public URL returning 403 vs signed POST to localhost:8001 returning 200.", "affected_selectors": []}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v3.py",
+    "/app/test_reports/pytest/pytest_results_v3.xml"
+  ],
+  "action_items": [
+    "[High] Fix Twilio signature validation to work behind the preview gateway. Either add '--proxy-headers --forwarded-allow-ips=*' to the uvicorn supervisor command AND ensure ingress forwards X-Forwarded-Proto/Host, OR build the URL inside _twilio_verify as f'{BACKEND_PUBLIC_URL}{request.url.path}'.  Without this, ALL Twilio callbacks in production return 403 → no missed_call → no auto follow-up → no recording url on the timeline.",
+    "[Medium] Do not raise HTTPException 502 in _initiate_twilio_call — the preview gateway strips the JSON body. Return {'ok': false, 'error': 'Twilio error: …'} with HTTP 400 (or 200) so the frontend toast can show the underlying Twilio reason (e.g. 21610 unverified destination).",
+    "[Low] Consider signature-validating the public GET/POST /twilio/twiml/{lead_id} endpoint too — it currently exposes lead phone numbers to anyone knowing the lead id.",
+    "[Cosmetic] Fix Radix Dialog warning: 'Missing Description or aria-describedby={undefined}' on the My-profile dialog (Sidebar.jsx). Add <DialogDescription> or aria-describedby."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1926 lines. Twilio block (routes + helpers) is ~215 lines. Time to split into routers/twilio.py and routers/users.py.",
+    "_initiate_twilio_call imports twilio.rest.Client at module import time (line 1389). If the twilio package is present but env vars are missing, _twilio_client stays None and the mock path runs — good. But the imports should be guarded / moved to top-of-file with the other imports.",
+    "Auto-call on /leads and /webhooks fetches settings twice in create_lead (lines 560 and 567) — dedupe.",
+    "_twilio_verify → validator.validate(url, form_dict, sig).  If the app moves behind a load balancer that terminates TLS, url will always be wrong (as demonstrated). The BACKEND_PUBLIC_URL env var already exists — use it.",
+    "Recording callback stores recording_url with '.mp3' appended if missing (line 1585-1586).  Twilio's real URL is Recordings/{sid} and works with .mp3, but the current code will also happily append .mp3 to already-suffixed URLs like /Recordings/RE1.mp3.wav — guard the suffix check.",
+    "log_activity is not called from _initiate_twilio_call (line 1460 uses db.activities.insert_one directly). Consider using the helper for consistency (actor_name, meta) and to keep future indexing/hooks in one place.",
+    "The 'follow_ups.insert_one' inside status-callback uses 'assigned_to': act.actor_id — for auto-calls initiated by the system (webhook) actor_id is None → the follow-up is unassigned. Add a fallback to lead.assigned_to."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v3.py (new)",
+    "/app/test_reports/pytest/pytest_results_v3.xml"
+  ],
+  "success_rate": {"backend": "100% (26/26 iter3 + regression spot-checks green)", "frontend": "100% of listed selectors verified; 1 UX gap (empty toast on Twilio error) traced to backend 502 + gateway HTML rewrite."},
+  "test_credentials": "admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123 — all verified. TEST_PHONE=+15005550006 (Twilio magic test), LEAD_PHONE=+919999900011 (unverified → 502 from Twilio trial).",
+  "seed_data_creation": "During tests I directly inserted synthetic activities and follow_ups via pymongo to exercise the signed happy-path (call_sid=CATEST…/CAREC…). All test rows are cleaned up in-test. TEST_TWL prefixed leads are torn down in teardown_module.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 3 backend suite lives at /app/backend/tests/backend_test_v3.py (26 tests). Run with `-n 0` (serial) to avoid xdist races on settings PATCHes. All Twilio env vars (TWILIO_ACCOUNT_SID/TOKEN/FROM=+15342044495, BACKEND_PUBLIC_URL) are set in backend/.env. Two known-issues to remember: (1) the preview gateway rewrites origin 5xx → HTML, so 502 responses cannot carry a JSON detail (frontend cannot show Twilio error text); (2) signature validation compares against the internal request URL rather than BACKEND_PUBLIC_URL — real Twilio webhooks will 403. If main agent fixes (1) or (2), rerun backend_test_v3.py.",
+  "rca_of_the_issue": "Twilio callback 403 on public URL — root cause: server.py:_twilio_verify calls validator.validate(str(request.url), …). Behind ingress/CF, uvicorn (started without --proxy-headers) reports request.url as 'http://<internal>:8001/…' which differs from the URL Twilio actually signed ('https://tasko-crm.preview.emergentagent.com/…') so the HMAC-SHA1 signature never matches. Verified: signed POST to https://…/api/twilio/status-callback returns 403 (mismatch), signed POST to http://localhost:8001/api/twilio/status-callback returns 200 (match). Mitigation options are listed in action_items."
+}

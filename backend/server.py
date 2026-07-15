@@ -154,6 +154,7 @@ class RegisterBody(BaseDoc):
     password: str
     name: str
     role: Role = "executive"
+    phone: Optional[str] = None
 
 
 class UpdateUserBody(BaseDoc):
@@ -275,6 +276,9 @@ class SettingsBody(BaseDoc):
     resend_from_email: Optional[str] = None
     auto_assign_enabled: Optional[bool] = None
     auto_followup_enabled: Optional[bool] = None
+    auto_call_on_new_lead: Optional[bool] = None
+    missed_call_followup_enabled: Optional[bool] = None
+    missed_call_followup_hours: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +368,23 @@ async def create_user(body: RegisterBody, actor: dict = Depends(require_roles("a
     }
     await db.users.insert_one(doc)
     return clean(doc)
+
+
+class UpdateSelfBody(BaseDoc):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    password: Optional[str] = None
+
+
+@api.patch("/users/me")
+async def update_self(body: UpdateSelfBody, actor: dict = Depends(get_current_user)):
+    update = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "password"}
+    if body.password:
+        update["password_hash"] = hash_password(body.password)
+    if not update:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    await db.users.update_one({"id": actor["id"]}, {"$set": update})
+    return await db.users.find_one({"id": actor["id"]}, {"password_hash": 0, "_id": 0})
 
 
 @api.patch("/users/{user_id}")
@@ -542,6 +563,17 @@ async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
     await db.leads.insert_one(doc)
     doc.pop("_id", None)
     await log_activity(doc["id"], actor, "lead_created", f"Lead created from {doc['source']}")
+    # Auto-call on new lead assignment (Twilio)
+    settings = await db.settings.find_one({"id": "singleton"}) or {}
+    if settings.get("auto_call_on_new_lead") and doc.get("assigned_to") and doc.get("phone"):
+        assignee = await db.users.find_one({"id": doc["assigned_to"]})
+        if assignee and assignee.get("phone"):
+            try:
+                await _initiate_twilio_call(doc, assignee)
+            except HTTPException as e:
+                log.warning("auto-call skipped: %s", e.detail)
+            except Exception as e:
+                log.warning("auto-call error: %s", e)
     return doc
 
 
@@ -633,6 +665,14 @@ async def _ingest_lead_from_payload(source: str, payload: dict) -> dict:
     await db.leads.insert_one(lead)
     lead.pop("_id", None)
     await log_activity(lead["id"], None, "lead_created", f"Auto-captured from {source}", {"raw": payload})
+    settings = await db.settings.find_one({"id": "singleton"}) or {}
+    if settings.get("auto_call_on_new_lead") and lead.get("assigned_to") and lead.get("phone"):
+        assignee = await db.users.find_one({"id": lead["assigned_to"]})
+        if assignee and assignee.get("phone"):
+            try:
+                await _initiate_twilio_call(lead, assignee)
+            except Exception as e:
+                log.warning("auto-call (webhook) skipped: %s", e)
     return lead
 
 
@@ -836,6 +876,9 @@ async def get_settings(user: dict = Depends(get_current_user)):
             "resend_from_email": "",
             "auto_assign_enabled": True,
             "auto_followup_enabled": True,
+            "auto_call_on_new_lead": False,
+            "missed_call_followup_enabled": True,
+            "missed_call_followup_hours": 24,
         }
         await db.settings.insert_one(s.copy())
     s.pop("_id", None)
@@ -1337,6 +1380,231 @@ async def report_sources(user: dict = Depends(get_current_user)):
         o["conversion"] = round((o["booked"] / o["total"] * 100), 1) if o["total"] else 0
     out.sort(key=lambda r: -r["total"])
     return out
+
+
+
+# ---------------------------------------------------------------------------
+# TWILIO VOICE — click-to-call, status + recording callbacks
+# ---------------------------------------------------------------------------
+from twilio.rest import Client as TwilioClient  # noqa: E402
+from twilio.request_validator import RequestValidator  # noqa: E402
+from twilio.twiml.voice_response import VoiceResponse  # noqa: E402
+from fastapi.responses import Response as StarletteResponse  # noqa: E402
+
+TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_FROM = os.environ.get("TWILIO_FROM_NUMBER")
+BACKEND_PUBLIC_URL = os.environ.get("BACKEND_PUBLIC_URL", "")
+
+_twilio_client: Optional[TwilioClient] = None
+_twilio_validator: Optional[RequestValidator] = None
+if TWILIO_SID and TWILIO_TOKEN:
+    try:
+        _twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+        _twilio_validator = RequestValidator(TWILIO_TOKEN)
+        log.info("Twilio client initialised (from=%s)", TWILIO_FROM)
+    except Exception as e:
+        log.warning("Twilio init failed: %s", e)
+
+
+def _looks_like_e164(num: str) -> bool:
+    return bool(num) and num.startswith("+") and len(num) >= 8
+
+
+async def _initiate_twilio_call(lead: dict, actor: dict) -> dict:
+    """Executive-first bridged call via Twilio. Rings the executive; on answer
+    the TwiML dials the lead and records the conversation."""
+    if not lead.get("phone") or not _looks_like_e164(lead["phone"].replace(" ", "")):
+        raise HTTPException(status_code=400, detail="Lead has no valid E.164 phone")
+    exec_phone = (actor.get("phone") or "").replace(" ", "")
+    if not _looks_like_e164(exec_phone):
+        raise HTTPException(status_code=400, detail="Set your phone (E.164, e.g. +9198…) on the Team page first")
+
+    lead_phone = lead["phone"].replace(" ", "")
+    activity_id = new_id()
+    now = now_utc().isoformat()
+
+    if not _twilio_client or not TWILIO_FROM or not BACKEND_PUBLIC_URL:
+        await db.activities.insert_one({
+            "id": activity_id,
+            "lead_id": lead["id"],
+            "actor_id": actor.get("id"),
+            "actor_name": actor.get("name") or "system",
+            "kind": "outgoing_call",
+            "message": f"[MOCK] Call queued to {lead['name']}",
+            "meta": {"direction": "outgoing", "status": "queued", "mock": True, "to": lead_phone, "from": exec_phone},
+            "created_at": now,
+        })
+        return {"call_sid": None, "status": "mock", "mock": True, "activity_id": activity_id}
+
+    twiml_url = f"{BACKEND_PUBLIC_URL}/api/twilio/twiml/{lead['id']}"
+    status_cb = f"{BACKEND_PUBLIC_URL}/api/twilio/status-callback"
+    recording_cb = f"{BACKEND_PUBLIC_URL}/api/twilio/recording-callback"
+
+    try:
+        call = _twilio_client.calls.create(
+            to=exec_phone,
+            from_=TWILIO_FROM,
+            url=twiml_url,
+            method="POST",
+            status_callback=status_cb,
+            status_callback_event=["initiated", "ringing", "answered", "completed"],
+            status_callback_method="POST",
+            record=True,
+            recording_status_callback=recording_cb,
+            recording_status_callback_method="POST",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Twilio error: {e}")
+
+    await db.activities.insert_one({
+        "id": activity_id,
+        "lead_id": lead["id"],
+        "actor_id": actor.get("id"),
+        "actor_name": actor.get("name") or "system",
+        "kind": "outgoing_call",
+        "message": f"Call initiated to {lead['name']}",
+        "meta": {
+            "direction": "outgoing",
+            "call_sid": call.sid,
+            "status": call.status,
+            "to_lead": lead_phone,
+            "to_exec": exec_phone,
+        },
+        "created_at": now,
+    })
+    return {"call_sid": call.sid, "status": call.status, "mock": False, "activity_id": activity_id}
+
+
+@api.post("/leads/{lead_id}/call")
+async def initiate_call(lead_id: str, actor: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if actor["role"] == "executive" and lead.get("assigned_to") != actor["id"]:
+        raise HTTPException(status_code=403, detail="You can only call your own leads")
+    return await _initiate_twilio_call(lead, actor)
+
+
+@api.api_route("/twilio/twiml/{lead_id}", methods=["GET", "POST"])
+async def twilio_twiml(lead_id: str, request: Request):
+    lead = await db.leads.find_one({"id": lead_id})
+    resp = VoiceResponse()
+    if not lead or not lead.get("phone"):
+        resp.say("Sorry, this lead has no phone number on record. Goodbye.")
+        return StarletteResponse(content=str(resp), media_type="application/xml")
+
+    resp.say(f"Connecting you to {lead.get('name', 'the lead')}.", voice="Polly.Aditi", language="en-IN")
+    recording_cb = f"{BACKEND_PUBLIC_URL}/api/twilio/recording-callback" if BACKEND_PUBLIC_URL else None
+    dial_kwargs = {"record": "record-from-answer-dual", "caller_id": TWILIO_FROM, "timeout": 30}
+    if recording_cb:
+        dial_kwargs["recording_status_callback"] = recording_cb
+        dial_kwargs["recording_status_callback_method"] = "POST"
+    dial = resp.dial(**dial_kwargs)
+    dial.number(lead["phone"].replace(" ", ""))
+    return StarletteResponse(content=str(resp), media_type="application/xml")
+
+
+def _twilio_verify(request: Request, form_dict: dict) -> bool:
+    if not _twilio_validator:
+        return True
+    sig = request.headers.get("X-Twilio-Signature", "")
+    url = str(request.url)
+    return _twilio_validator.validate(url, form_dict, sig)
+
+
+@api.post("/twilio/status-callback")
+async def twilio_status_callback(request: Request):
+    form = dict(await request.form())
+    if not _twilio_verify(request, form):
+        log.warning("Twilio signature mismatch on status-callback")
+        return StarletteResponse(status_code=403)
+
+    call_sid = form.get("CallSid")
+    parent_sid = form.get("ParentCallSid")
+    key_sid = parent_sid or call_sid
+    call_status = form.get("CallStatus") or ""
+    duration = form.get("CallDuration")
+
+    act = await db.activities.find_one({"meta.call_sid": key_sid})
+    if not act:
+        return StarletteResponse(status_code=200)
+
+    meta = act.get("meta") or {}
+    meta["status"] = call_status
+    try:
+        if duration:
+            meta["duration_sec"] = int(duration)
+    except ValueError:
+        pass
+
+    unsuccessful = {"no-answer", "busy", "failed", "canceled"}
+    dur_i = int(meta.get("duration_sec") or 0)
+    is_missed = call_status in unsuccessful or (call_status == "completed" and dur_i == 0)
+    disposition = call_status.replace("-", "_") if is_missed else "connected"
+    meta["disposition"] = disposition
+    kind = "missed_call" if is_missed else "outgoing_call"
+
+    await db.activities.update_one(
+        {"id": act["id"]},
+        {"$set": {"meta": meta, "kind": kind, "message": f"Call {call_status} · {duration or 0}s"}},
+    )
+
+    if is_missed:
+        settings = await db.settings.find_one({"id": "singleton"}) or {}
+        if settings.get("missed_call_followup_enabled", True):
+            hours = float(settings.get("missed_call_followup_hours", 24))
+            due = now_utc() + timedelta(hours=hours)
+            await db.follow_ups.insert_one({
+                "id": new_id(),
+                "lead_id": act["lead_id"],
+                "due_at": due.isoformat(),
+                "kind": "call",
+                "notes": f"Auto-scheduled after {call_status} call",
+                "assigned_to": act.get("actor_id"),
+                "status": "pending",
+                "created_at": now_utc().isoformat(),
+                "meta": {"auto": True, "source_call_sid": key_sid},
+            })
+    return StarletteResponse(status_code=200)
+
+
+@api.post("/twilio/recording-callback")
+async def twilio_recording_callback(request: Request):
+    form = dict(await request.form())
+    if not _twilio_verify(request, form):
+        log.warning("Twilio signature mismatch on recording-callback")
+        return StarletteResponse(status_code=403)
+
+    call_sid = form.get("CallSid")
+    parent_sid = form.get("ParentCallSid")
+    key_sid = parent_sid or call_sid
+    recording_url = form.get("RecordingUrl")
+    recording_sid = form.get("RecordingSid")
+    duration = form.get("RecordingDuration")
+    if recording_url and not recording_url.endswith(".mp3"):
+        recording_url = recording_url + ".mp3"
+
+    act = await db.activities.find_one({"meta.call_sid": key_sid})
+    if act:
+        meta = act.get("meta") or {}
+        meta["recording_url"] = recording_url
+        meta["recording_sid"] = recording_sid
+        try:
+            meta["recording_duration_sec"] = int(duration or 0)
+        except ValueError:
+            pass
+        await db.activities.update_one({"id": act["id"]}, {"$set": {"meta": meta}})
+    return StarletteResponse(status_code=200)
+
+
+@api.get("/twilio/status")
+async def twilio_status(user: dict = Depends(get_current_user)):
+    return {
+        "configured": bool(_twilio_client),
+        "from_number": TWILIO_FROM if _twilio_client else None,
+        "webhook_base": BACKEND_PUBLIC_URL,
+    }
 
 
 

@@ -2,16 +2,19 @@ import React, { useEffect, useState } from "react";
 import { api, formatApiError } from "@/lib/api";
 import { SETTINGS } from "@/constants/testIds";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { MessageSquare, Mail, Calendar as CalIcon, Zap, Globe, PhoneCall } from "lucide-react";
+import { MessageSquare, Mail, Calendar as CalIcon, Zap, Globe, PhoneCall, CheckCircle2 } from "lucide-react";
 
 export default function Settings() {
   const [s, setS] = useState(null);
+  const [tw, setTw] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const { data } = await api.get("/settings");
-    setS(data);
+    const [sr, tr] = await Promise.all([api.get("/settings"), api.get("/twilio/status")]);
+    setS(sr.data);
+    setTw(tr.data);
   };
   useEffect(() => { load(); }, []);
 
@@ -26,7 +29,7 @@ export default function Settings() {
     finally { setBusy(false); }
   };
 
-  if (!s) return <div className="text-forest/50 text-sm">Loading…</div>;
+  if (!s || !tw) return <div className="text-forest/50 text-sm">Loading…</div>;
 
   const set = (k, v) => setS({ ...s, [k]: v });
   const webhookBase = `${process.env.REACT_APP_BACKEND_URL}/api/webhooks/leads`;
@@ -108,28 +111,108 @@ export default function Settings() {
       <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">
         <div className="flex items-start gap-3 mb-4">
           <PhoneCall className="h-4 w-4 mt-1 text-forest/60" />
-          <div>
-            <div className="font-display font-bold text-xl text-forest tracking-tight">Calling & recording</div>
+          <div className="flex-1">
+            <div className="flex items-center gap-3">
+              <div className="font-display font-bold text-xl text-forest tracking-tight">Twilio calling</div>
+              {tw?.configured ? (
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.15em] font-bold text-[#2D6A4F] bg-[#2D6A4F]/10 border border-[#2D6A4F]/30 rounded-sm px-2 py-0.5">
+                  <CheckCircle2 className="h-3 w-3" /> Live
+                </span>
+              ) : (
+                <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-clay bg-clay/10 border border-clay/30 rounded-sm px-2 py-0.5">Mock mode</span>
+              )}
+            </div>
             <div className="text-xs text-forest/60 mt-1">
-              Executives can dial leads from Tasko and every recording is pinned to the timeline. We recommend the following providers — each posts recording URLs to Tasko via webhook once a call ends:
+              Executive-first bridge: Twilio rings the executive's phone first, then dials the lead. Every call is recorded and pinned to the lead's timeline. Auto-dialer / predictive calling is deferred to a future release.
+            </div>
+          </div>
+        </div>
+
+        {tw?.configured && (
+          <div className="grid md:grid-cols-2 gap-2 mb-5 text-xs">
+            <div className="border border-[#E6E4DD] rounded-sm px-3 py-2 flex items-center justify-between">
+              <span className="uppercase tracking-[0.15em] font-bold text-forest/60">Caller ID</span>
+              <code className="text-forest">{tw.from_number}</code>
+            </div>
+            <div className="border border-[#E6E4DD] rounded-sm px-3 py-2 flex items-center justify-between">
+              <span className="uppercase tracking-[0.15em] font-bold text-forest/60">Webhook base</span>
+              <code className="text-forest truncate max-w-[240px]">{tw.webhook_base}</code>
+            </div>
+          </div>
+        )}
+
+        <Row
+          icon={Zap}
+          title="Auto-call on new lead"
+          hint="When a fresh lead is assigned to an executive, Twilio instantly rings the executive's phone and bridges the lead. Skip this if you want executives to click Call manually."
+          testId="settings-toggle-autocall"
+          checked={!!s.auto_call_on_new_lead}
+          onChange={(v) => set("auto_call_on_new_lead", v)}
+        />
+
+        <div className="mt-5 pt-5 border-t border-[#E6E4DD]">
+          <Row
+            icon={Zap}
+            title="Auto follow-up on missed / no-answer calls"
+            hint="If Twilio reports the lead didn't pick up, Tasko creates a follow-up task on the executive's list automatically."
+            testId="settings-toggle-missed-followup"
+            checked={!!s.missed_call_followup_enabled}
+            onChange={(v) => set("missed_call_followup_enabled", v)}
+          />
+          {s.missed_call_followup_enabled && (
+            <div className="pl-11 mt-3">
+              <div className="label-caps mb-1.5">Schedule next call after…</div>
+              <Select
+                value={String(s.missed_call_followup_hours ?? 24)}
+                onValueChange={(v) => set("missed_call_followup_hours", Number(v))}
+              >
+                <SelectTrigger data-testid="settings-missed-hours" className="w-56 h-10 rounded-sm border-[#E6E4DD]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0.25">15 minutes</SelectItem>
+                  <SelectItem value="1">1 hour</SelectItem>
+                  <SelectItem value="2">2 hours</SelectItem>
+                  <SelectItem value="4">4 hours</SelectItem>
+                  <SelectItem value="8">8 hours</SelectItem>
+                  <SelectItem value="24">1 day (recommended)</SelectItem>
+                  <SelectItem value="48">2 days</SelectItem>
+                  <SelectItem value="72">3 days</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+
+        {!tw?.configured && (
+          <div className="mt-5 text-xs text-forest/50">
+            Set <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_FROM_NUMBER</code> and <code>BACKEND_PUBLIC_URL</code> in the backend .env to enable live calling.
+          </div>
+        )}
+      </section>
+
+      <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <PhoneCall className="h-4 w-4 mt-1 text-forest/60" />
+          <div>
+            <div className="font-display font-bold text-xl text-forest tracking-tight">Calling & recording providers</div>
+            <div className="text-xs text-forest/60 mt-1">
+              Tasko is wired to <b>Twilio Voice REST</b> today. These alternatives can slot in when you outgrow Twilio in India:
             </div>
           </div>
         </div>
         <div className="grid md:grid-cols-3 gap-3">
           {[
-            { name: "Exotel", tag: "Recommended · India", url: "https://exotel.com" },
-            { name: "MyOperator", tag: "India", url: "https://myoperator.com" },
-            { name: "Twilio Voice", tag: "Global", url: "https://twilio.com/voice" },
+            { name: "Twilio Voice", tag: "Active", url: "https://twilio.com/voice", active: true },
+            { name: "Exotel", tag: "India · alternative", url: "https://exotel.com" },
+            { name: "MyOperator", tag: "India · alternative", url: "https://myoperator.com" },
           ].map((p) => (
-            <a key={p.name} href={p.url} target="_blank" rel="noreferrer" className="border border-[#E6E4DD] rounded-sm p-4 hover:border-forest transition-colors duration-150">
-              <div className="font-display font-bold text-forest">{p.name}</div>
+            <a key={p.name} href={p.url} target="_blank" rel="noreferrer" className={`border rounded-sm p-4 transition-colors duration-150 ${p.active ? "border-forest bg-forest/5" : "border-[#E6E4DD] hover:border-forest"}`}>
+              <div className="flex items-center gap-2">
+                <div className="font-display font-bold text-forest">{p.name}</div>
+                {p.active && <span className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#2D6A4F]">Active</span>}
+              </div>
               <div className="text-[10px] uppercase tracking-[0.15em] text-forest/50 mt-1">{p.tag}</div>
-              <div className="text-xs text-forest/60 mt-2">Click-to-call · recording URL webhook · IVR routing</div>
             </a>
           ))}
-        </div>
-        <div className="mt-4 text-xs text-forest/50">
-          Once configured, executives will see a call button next to every lead phone number. Recordings show up automatically inside the lead timeline with play + download.
         </div>
       </section>
 

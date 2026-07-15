@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { LEADS } from "@/constants/testIds";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
-import { ArrowLeft, Phone, Mail, MessageSquare, CalendarPlus, BellPlus, PhoneCall, Send, PhoneMissed, Download } from "lucide-react";
+import { ArrowLeft, Phone, Mail, MessageSquare, CalendarPlus, BellPlus, PhoneCall, Send, PhoneMissed, Download, PhoneOutgoing } from "lucide-react";
 import { toast } from "sonner";
 import StarRating from "@/components/StarRating";
 
@@ -285,8 +285,22 @@ export default function LeadDetail() {
             </div>
           </div>
 
-          {/* Log actions row */}
-          <div className="grid grid-cols-3 gap-3">
+          {/* Twilio Call button (live) + manual log actions */}
+          <div className="grid grid-cols-4 gap-3">
+            <button
+              data-testid="lead-twilio-call-btn"
+              onClick={async () => {
+                try {
+                  const { data } = await api.post(`/leads/${leadId}/call`);
+                  if (data.mock) toast.info("Twilio not configured — mock call logged");
+                  else toast.success(`Ringing your phone… (${data.status})`);
+                  load();
+                } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+              }}
+              className="h-10 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150 inline-flex items-center justify-center gap-2 col-span-1"
+            >
+              <PhoneOutgoing className="h-4 w-4" /> Call
+            </button>
             <LogCallDialog leadId={leadId} onSaved={load} />
             <LogSmsDialog leadId={leadId} onSaved={load} templates={templates} />
             <LogEmailDialog leadId={leadId} onSaved={load} />

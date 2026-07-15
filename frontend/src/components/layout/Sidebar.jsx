@@ -1,12 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { api, formatApiError } from "@/lib/api";
 import {
   LayoutDashboard, Users2, Building2, BedDouble, CalendarClock, BellRing,
   UserCog, Settings as SettingsIcon, LogOut, BarChart3, UploadCloud,
-  MessageSquareText, ShuffleIcon, Handshake, FileText, ChevronDown,
+  MessageSquareText, ShuffleIcon, Handshake, FileText, User,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { NAV, AUTH } from "@/constants/testIds";
+import { toast } from "sonner";
 
 const GROUPS = [
   {
@@ -41,7 +44,18 @@ const GROUPS = [
 ];
 
 export default function Sidebar() {
-  const { user, logout } = useAuth();
+  const { user, logout, setUser } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [phone, setPhone] = useState(user?.phone || "");
+
+  const saveProfile = async () => {
+    try {
+      const { data } = await api.patch("/users/me", { phone });
+      setUser(data);
+      toast.success("Profile updated");
+      setProfileOpen(false);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   return (
     <aside
@@ -91,12 +105,17 @@ export default function Sidebar() {
 
       <div className="relative z-10 px-4 pb-6">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-sm bg-white/10 grid place-items-center text-sm font-display font-bold">
+          <button
+            onClick={() => { setPhone(user?.phone || ""); setProfileOpen(true); }}
+            className="h-9 w-9 rounded-sm bg-white/10 hover:bg-white/20 grid place-items-center text-sm font-display font-bold transition-colors duration-150"
+            data-testid="sidebar-profile-btn"
+            title="My profile"
+          >
             {(user?.name || "?").slice(0, 1).toUpperCase()}
-          </div>
+          </button>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold truncate">{user?.name}</div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{user?.role}</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{user?.role}{user?.phone ? "" : " · set phone"}</div>
           </div>
           <button
             data-testid={AUTH.logoutBtn}
@@ -108,6 +127,36 @@ export default function Sidebar() {
           </button>
         </div>
       </div>
+
+      <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
+        <DialogContent className="rounded-sm max-w-md">
+          <DialogHeader><DialogTitle className="font-display text-2xl">My profile</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <div className="label-caps mb-1.5">Name</div>
+              <div className="text-sm text-forest">{user?.name}</div>
+            </div>
+            <div>
+              <div className="label-caps mb-1.5">Email</div>
+              <div className="text-sm text-forest">{user?.email}</div>
+            </div>
+            <div>
+              <div className="label-caps mb-1.5">Phone (E.164 · used for Twilio call bridging)</div>
+              <input
+                data-testid="profile-phone-input"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+919812345678"
+                className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest"
+              />
+              <div className="text-[11px] text-forest/50 mt-1">On a Twilio trial account, this number must be verified in your Twilio console for calls to connect.</div>
+            </div>
+          </div>
+          <DialogFooter>
+            <button data-testid="profile-save-btn" onClick={saveProfile} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150">Save</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }
