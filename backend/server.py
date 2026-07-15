@@ -630,7 +630,9 @@ async def add_note(lead_id: str, body: NoteBody, actor: dict = Depends(get_curre
 
 @api.delete("/leads/{lead_id}")
 async def delete_lead(lead_id: str, actor: dict = Depends(require_roles("admin"))):
-    await db.leads.delete_one({"id": lead_id})
+    r = await db.leads.delete_one({"id": lead_id})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Lead not found")
     await db.activities.delete_many({"lead_id": lead_id})
     return {"ok": True}
 
