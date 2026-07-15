@@ -3,7 +3,7 @@ import { api, formatApiError } from "@/lib/api";
 import { SETTINGS } from "@/constants/testIds";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { MessageSquare, Mail, Calendar as CalIcon, Zap, Globe } from "lucide-react";
+import { MessageSquare, Mail, Calendar as CalIcon, Zap, Globe, PhoneCall } from "lucide-react";
 
 export default function Settings() {
   const [s, setS] = useState(null);
@@ -103,6 +103,34 @@ export default function Settings() {
           checked={!!s.google_calendar_enabled}
           onChange={(v) => set("google_calendar_enabled", v)}
         />
+      </section>
+
+      <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <PhoneCall className="h-4 w-4 mt-1 text-forest/60" />
+          <div>
+            <div className="font-display font-bold text-xl text-forest tracking-tight">Calling & recording</div>
+            <div className="text-xs text-forest/60 mt-1">
+              Executives can dial leads from Tasko and every recording is pinned to the timeline. We recommend the following providers — each posts recording URLs to Tasko via webhook once a call ends:
+            </div>
+          </div>
+        </div>
+        <div className="grid md:grid-cols-3 gap-3">
+          {[
+            { name: "Exotel", tag: "Recommended · India", url: "https://exotel.com" },
+            { name: "MyOperator", tag: "India", url: "https://myoperator.com" },
+            { name: "Twilio Voice", tag: "Global", url: "https://twilio.com/voice" },
+          ].map((p) => (
+            <a key={p.name} href={p.url} target="_blank" rel="noreferrer" className="border border-[#E6E4DD] rounded-sm p-4 hover:border-forest transition-colors duration-150">
+              <div className="font-display font-bold text-forest">{p.name}</div>
+              <div className="text-[10px] uppercase tracking-[0.15em] text-forest/50 mt-1">{p.tag}</div>
+              <div className="text-xs text-forest/60 mt-2">Click-to-call · recording URL webhook · IVR routing</div>
+            </a>
+          ))}
+        </div>
+        <div className="mt-4 text-xs text-forest/50">
+          Once configured, executives will see a call button next to every lead phone number. Recordings show up automatically inside the lead timeline with play + download.
+        </div>
       </section>
 
       <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">

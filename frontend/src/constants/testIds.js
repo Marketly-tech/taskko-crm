@@ -12,12 +12,31 @@ export const NAV = {
   projectSwitcher: "topbar-project-switcher",
   itemDashboard: "nav-dashboard",
   itemLeads: "nav-leads",
-  itemProjects: "nav-projects",
-  itemInventory: "nav-inventory",
   itemVisits: "nav-visits",
   itemFollowups: "nav-followups",
+  itemProjects: "nav-projects",
+  itemInventory: "nav-inventory",
+  itemReports: "nav-reports",
+  itemDataImport: "nav-data-import",
+  itemWATemplates: "nav-wa-templates",
+  itemBulkAlloc: "nav-bulk-alloc",
+  itemPartners: "nav-partners",
+  itemProposals: "nav-proposals",
   itemTeam: "nav-team",
   itemSettings: "nav-settings",
+};
+
+export const DASH = {
+  tabMonth: "dash-tab-month",
+  tabActions: "dash-tab-actions",
+  kpiNewLeads: "dash-kpi-new-leads",
+  kpiRevenue: "dash-kpi-revenue",
+  kpiBooked: "dash-kpi-booked",
+  kpiConversion: "dash-kpi-conversion",
+  kpiMissed: "dash-kpi-missed",
+  kpiFollowups: "dash-kpi-followups",
+  kpiScheduledCalls: "dash-kpi-scheduled-calls",
+  kpiTasks: "dash-kpi-tasks",
 };
 
 export const LEADS = {
@@ -25,6 +44,8 @@ export const LEADS = {
   searchInput: "leads-search-input",
   filterStage: "leads-filter-stage",
   filterSource: "leads-filter-source",
+  filterExec: "leads-filter-exec",
+  filterProject: "leads-filter-project",
   newLeadBtn: "leads-new-btn",
   createSubmit: "leads-create-submit",
   createName: "leads-create-name",
@@ -33,6 +54,7 @@ export const LEADS = {
   createSource: "leads-create-source",
   createBudget: "leads-create-budget",
   row: (id) => `leads-row-${id}`,
+  rowCheckbox: (id) => `leads-row-check-${id}`,
   kanbanCard: (id) => `kanban-card-${id}`,
   kanbanColumn: (stage) => `kanban-col-${stage}`,
   assignBtn: "lead-assign-btn",
@@ -40,6 +62,13 @@ export const LEADS = {
   addNoteBtn: "lead-add-note-btn",
   addNoteInput: "lead-note-input",
   addNoteSubmit: "lead-note-submit",
+  logCallBtn: "lead-log-call-btn",
+  logSmsBtn: "lead-log-sms-btn",
+  logEmailBtn: "lead-log-email-btn",
+  submitCallBtn: "lead-submit-call-btn",
+  submitSmsBtn: "lead-submit-sms-btn",
+  submitEmailBtn: "lead-submit-email-btn",
+  starBtn: (n) => `lead-star-${n}`,
 };
 
 export const PROJECT = {
@@ -83,6 +112,21 @@ export const SETTINGS = {
   toggleCalendar: "settings-toggle-calendar",
   toggleAutoAssign: "settings-toggle-autoassign",
   toggleAutoFollowup: "settings-toggle-autofollowup",
+};
+
+export const CONSOLE = {
+  waNewBtn: "wa-new-btn",
+  waSubmitBtn: "wa-submit-btn",
+  waRow: (id) => `wa-row-${id}`,
+  cpNewBtn: "cp-new-btn",
+  cpSubmitBtn: "cp-submit-btn",
+  cpRow: (id) => `cp-row-${id}`,
+  propNewBtn: "prop-new-btn",
+  propSubmitBtn: "prop-submit-btn",
+  bulkExec: "bulk-exec-select",
+  bulkAssignBtn: "bulk-assign-btn",
+  importFile: "import-file",
+  importBtn: "import-btn",
 };
 
 export const HOME = { emergentLink: "home-emergent-link" };

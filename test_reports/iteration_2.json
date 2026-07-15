@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 2 — Dashboard (Month + Action Items) + My Console modules. Backend: 19/19 new pytest tests pass covering log-call/sms/email (with recording_url meta, no_answer→missed_call), star rating PATCH, bulk-assign (admin only, executive 403), CSV import (project_name resolution), WhatsApp templates CRUD + role gating, Channel Partners CRUD + admin-only DELETE, Proposals create→accept + activity, /dashboard/monthly (KPIs/revenue/telemetry-4-rows/pipeline-7-stages/top_leads/recent/upcoming), /dashboard/action-items (widgets/lists), /reports/executives + /reports/sources. Frontend (Playwright): admin dashboard renders both tabs and all 4+4 KPI testids, sidebar shows all 14 nav items grouped into Workspace/Project/My Console, topbar project switcher visible on /projects & hidden on / and /leads as spec'd, Leads page shows executive & project filter selects, LeadDetail renders 5-star rating (all lead-star-1..5 testids), Log call/sms/email buttons open dialogs and submit successfully (audio elements appear in timeline after posting recording_url), Executive login correctly HIDES nav-team / nav-settings / nav-data-import / nav-bulk-alloc and still shows reports/wa-templates/partners/proposals.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/dashboard/monthly", "issue": "kpi.conversion uses `total_leads_m = new_leads or 1` — when new_leads == 0, denominator becomes 1 (silent), so booked/0 → booked% would be misleading. Currently returns 0% when both are 0, but if booked>0 with no new_leads in the current month (e.g., an older lead moved to booked this month), it can produce a >100% number. Consider basing conversion on leads whose stage transitioned to booked within the current month."},
+      {"endpoint": "POST /api/leads/import", "issue": "Row validation swallows ALL exceptions into 'failed' count (bare `except Exception: failed += 1`). If a row has invalid data, caller gets no reason. Suggest collecting per-row error messages in the response."},
+      {"endpoint": "POST /api/leads/bulk-assign", "issue": "log_activity is called for every lead_id even for IDs that don't exist / weren't matched. Consider logging only for matched IDs."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard › Total lead pipeline (BarChart)", "issues": ["Bars render in solid black in the executive view (see screenshot). While readable, it visually clashes with the muted earthy palette used elsewhere. Consider using the same forest/clay accents as other cards."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/backend_test_v2.py",
+    "/app/test_reports/pytest/pytest_results_v2.xml"
+  ],
+  "action_items": [
+    "(Minor) Fix conversion math in /api/dashboard/monthly so it does not divide by 1 when there are 0 new leads in the current month (can misrepresent as >100%).",
+    "(Minor) /api/leads/import returns per-row errors instead of only aggregate failed count.",
+    "(Cosmetic) Restyle the Total-lead-pipeline BarChart bars from black to the palette accent (forest / clay)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1600 lines — split into routers/ (dashboard.py, leads_ext.py, wa_templates.py, channel_partners.py, proposals.py, reports.py, seed.py) for maintainability.",
+    "/api/dashboard/monthly issues N sequential activity count queries (4 kinds * 4 months = 16 counts) + N pipeline stage counts. Fine for demo but should be aggregated (single $facet or $group) at scale.",
+    "log_activity has no index hints; recommend a compound index on activities: (lead_id, created_at desc) and (kind, created_at desc) to keep telemetry/action-items queries fast as data grows.",
+    "Proposals `create_proposal` requires only get_current_user — any executive can create a proposal for any lead including leads they don't own. Consider ownership check for executives.",
+    "Channel partner `email` uses `EmailStr` in Pydantic — sending null works but empty string would 422 like the earlier Leads bug; front-end should strip empty email in the new-partner dialog.",
+    "Bulk assign endpoint response uses `matched` and `modified` but the spec expects `modified count`. Response includes both, which is fine, but confirm frontend reads the right key.",
+    "Frontend DataImport CSV parser doesn't handle escaped double-quote (\"\"). Fine for typical CSVs but real Excel exports may contain them."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v2.py (new)"
+  ],
+  "success_rate": {"backend": "100% (19/19 new + previously 30/30)", "frontend": "100% (all critical selectors + flows verified)"},
+  "test_credentials": "admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123 — all verified working.",
+  "seed_data_creation": "None. Used seeded 3 projects, 5 users, 48 leads, 4 wa_templates, 3 channel_partners, existing proposals + synthesized activity rows. All TEST_ prefixed data (leads, users, projects, wa-templates, cp, proposals) is cleaned up in-test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 2 is green end-to-end. Backend V2 tests live at /app/backend/tests/backend_test_v2.py alongside the iteration 1 file. Frontend Dashboard tabs, Sidebar grouping, Topbar route-scoping, Leads exec/project filters, LeadDetail star + log-call/sms/email dialogs, RBAC for exec (hides team/settings/data-import/bulk-alloc) are all verified. Only outstanding items are the small logic + cosmetic issues noted above.",
+  "rca_of_the_issue": "No blocking issues. Minor conversion-math edge case in /api/dashboard/monthly noted above."
+}

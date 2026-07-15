@@ -3,18 +3,173 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import { api, formatApiError, STAGE_META, STAGE_LABEL, SOURCE_LABEL, inr, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { LEADS } from "@/constants/testIds";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
-  Tabs, TabsList, TabsTrigger, TabsContent,
-} from "@/components/ui/tabs";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { ArrowLeft, Phone, Mail, MessageSquare, CalendarPlus, BellPlus, Building2, Target, User2 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { ArrowLeft, Phone, Mail, MessageSquare, CalendarPlus, BellPlus, PhoneCall, Send, PhoneMissed, Download } from "lucide-react";
 import { toast } from "sonner";
+import StarRating from "@/components/StarRating";
+
+const KIND_ICON = {
+  outgoing_call: PhoneCall, incoming_call: Phone, missed_call: PhoneMissed, call: PhoneCall,
+  email_sent: Mail, email: Mail, sms_sent: MessageSquare, whatsapp: MessageSquare,
+  note: MessageSquare, stage_change: BellPlus, assignment: BellPlus,
+  site_visit_scheduled: CalendarPlus, followup_scheduled: BellPlus,
+  lead_created: Send, proposal_created: Send,
+};
+
+function LogCallDialog({ leadId, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ direction: "outgoing", duration_sec: 60, disposition: "connected", recording_url: "", notes: "" });
+  const submit = async () => {
+    try {
+      const body = { ...form, duration_sec: Number(form.duration_sec) };
+      if (!body.recording_url) delete body.recording_url;
+      if (!body.notes) delete body.notes;
+      await api.post(`/leads/${leadId}/log-call`, body);
+      toast.success("Call logged");
+      setOpen(false); setForm({ direction: "outgoing", duration_sec: 60, disposition: "connected", recording_url: "", notes: "" });
+      onSaved?.();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button data-testid={LEADS.logCallBtn} className="h-10 rounded-sm border border-[#E6E4DD] text-sm text-forest hover:border-forest transition-colors duration-150 inline-flex items-center justify-center gap-2 flex-1">
+          <PhoneCall className="h-4 w-4" /> Log call
+        </button>
+      </DialogTrigger>
+      <DialogContent className="rounded-sm max-w-md">
+        <DialogHeader><DialogTitle className="font-display text-2xl">Log a call</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="label-caps mb-1.5">Direction</div>
+              <Select value={form.direction} onValueChange={(v) => setForm({ ...form, direction: v })}>
+                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="outgoing">Outgoing</SelectItem>
+                  <SelectItem value="incoming">Incoming</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <div className="label-caps mb-1.5">Disposition</div>
+              <Select value={form.disposition} onValueChange={(v) => setForm({ ...form, disposition: v })}>
+                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="connected">Connected</SelectItem>
+                  <SelectItem value="missed">Missed</SelectItem>
+                  <SelectItem value="busy">Busy</SelectItem>
+                  <SelectItem value="no_answer">No answer</SelectItem>
+                  <SelectItem value="voicemail">Voicemail</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <div className="label-caps mb-1.5">Duration (seconds)</div>
+            <input type="number" value={form.duration_sec} onChange={(e) => setForm({ ...form, duration_sec: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+          </div>
+          <div>
+            <div className="label-caps mb-1.5">Recording URL (mp3/wav)</div>
+            <input value={form.recording_url} onChange={(e) => setForm({ ...form, recording_url: e.target.value })} placeholder="https://cdn.exotel.in/…mp3" className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+            <div className="text-[11px] text-forest/50 mt-1">Auto-populated by Exotel / MyOperator / Twilio webhooks in production.</div>
+          </div>
+          <div>
+            <div className="label-caps mb-1.5">Notes</div>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-[#E6E4DD] rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-forest" />
+          </div>
+        </div>
+        <DialogFooter>
+          <button data-testid={LEADS.submitCallBtn} onClick={submit} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150">Log call</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LogSmsDialog({ leadId, onSaved, templates }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [tid, setTid] = useState("");
+  useEffect(() => {
+    if (tid) { const t = templates.find((x) => x.id === tid); if (t) setText(t.body); }
+  }, [tid, templates]);
+  const submit = async () => {
+    if (!text.trim()) return;
+    try { await api.post(`/leads/${leadId}/log-sms`, { text, template_id: tid || null }); toast.success("SMS logged"); setOpen(false); setText(""); onSaved?.(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button data-testid={LEADS.logSmsBtn} className="h-10 rounded-sm border border-[#E6E4DD] text-sm text-forest hover:border-forest transition-colors duration-150 inline-flex items-center justify-center gap-2 flex-1">
+          <MessageSquare className="h-4 w-4" /> Log SMS
+        </button>
+      </DialogTrigger>
+      <DialogContent className="rounded-sm max-w-md">
+        <DialogHeader><DialogTitle className="font-display text-2xl">Log an SMS</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          {templates.length > 0 && (
+            <div>
+              <div className="label-caps mb-1.5">Template (optional)</div>
+              <Select value={tid || "__none__"} onValueChange={(v) => setTid(v === "__none__" ? "" : v)}>
+                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Pick a template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No template —</SelectItem>
+                  {templates.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div>
+            <div className="label-caps mb-1.5">Message</div>
+            <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="w-full border border-[#E6E4DD] rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-forest" />
+          </div>
+        </div>
+        <DialogFooter>
+          <button data-testid={LEADS.submitSmsBtn} onClick={submit} disabled={!text.trim()} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150 disabled:opacity-50">Log SMS</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function LogEmailDialog({ leadId, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const submit = async () => {
+    if (!subject.trim() || !body.trim()) return;
+    try { await api.post(`/leads/${leadId}/log-email`, { subject, body }); toast.success("Email logged"); setOpen(false); setSubject(""); setBody(""); onSaved?.(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button data-testid={LEADS.logEmailBtn} className="h-10 rounded-sm border border-[#E6E4DD] text-sm text-forest hover:border-forest transition-colors duration-150 inline-flex items-center justify-center gap-2 flex-1">
+          <Mail className="h-4 w-4" /> Log email
+        </button>
+      </DialogTrigger>
+      <DialogContent className="rounded-sm max-w-md">
+        <DialogHeader><DialogTitle className="font-display text-2xl">Log an email</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <div className="label-caps mb-1.5">Subject</div>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+          </div>
+          <div>
+            <div className="label-caps mb-1.5">Body</div>
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5} className="w-full border border-[#E6E4DD] rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-forest" />
+          </div>
+        </div>
+        <DialogFooter>
+          <button data-testid={LEADS.submitEmailBtn} onClick={submit} disabled={!subject.trim() || !body.trim()} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150 disabled:opacity-50">Log email</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function LeadDetail() {
   const { leadId } = useParams();
@@ -24,9 +179,9 @@ export default function LeadDetail() {
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [activities, setActivities] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [note, setNote] = useState("");
   const [noteKind, setNoteKind] = useState("note");
-  const [scheduling, setScheduling] = useState(false);
   const [visitAt, setVisitAt] = useState("");
   const [visitProjectId, setVisitProjectId] = useState("");
   const [fuAt, setFuAt] = useState("");
@@ -35,16 +190,14 @@ export default function LeadDetail() {
   const [visitOpen, setVisitOpen] = useState(false);
 
   const load = async () => {
-    const [l, u, p, a] = await Promise.all([
+    const [l, u, p, a, t] = await Promise.all([
       api.get(`/leads/${leadId}`),
       api.get("/users"),
       api.get("/projects"),
-      api.get("/activities", { params: { lead_id: leadId, limit: 50 } }),
+      api.get("/activities", { params: { lead_id: leadId, limit: 100 } }),
+      api.get("/whatsapp-templates"),
     ]);
-    setLead(l.data);
-    setUsers(u.data);
-    setProjects(p.data);
-    setActivities(a.data);
+    setLead(l.data); setUsers(u.data); setProjects(p.data); setActivities(a.data); setTemplates(t.data);
     setVisitProjectId(l.data.project_id || "");
   };
 
@@ -61,47 +214,32 @@ export default function LeadDetail() {
     toast.success(`Stage → ${STAGE_LABEL[newStage]}`);
     load();
   };
-
   const reassign = async (userId) => {
     await api.post(`/leads/${leadId}/assign`, { user_id: userId });
-    toast.success("Reassigned");
-    load();
+    toast.success("Reassigned"); load();
   };
-
   const addNote = async () => {
     if (!note.trim()) return;
     await api.post(`/leads/${leadId}/notes`, { text: note.trim(), kind: noteKind });
-    setNote("");
+    setNote(""); load();
+  };
+  const setStars = async (n) => {
+    await api.patch(`/leads/${leadId}`, { stars: n });
     load();
   };
-
   const scheduleVisit = async () => {
     if (!visitAt || !visitProjectId) { toast.error("Pick date & project"); return; }
-    setScheduling(true);
     try {
-      await api.post("/site-visits", {
-        lead_id: leadId, project_id: visitProjectId, scheduled_at: new Date(visitAt).toISOString(),
-      });
-      toast.success("Site visit scheduled");
-      setVisitOpen(false); setVisitAt("");
-      load();
-    } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail));
-    } finally {
-      setScheduling(false);
-    }
+      await api.post("/site-visits", { lead_id: leadId, project_id: visitProjectId, scheduled_at: new Date(visitAt).toISOString() });
+      toast.success("Site visit scheduled"); setVisitOpen(false); setVisitAt(""); load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
-
   const createFollowup = async () => {
     if (!fuAt) { toast.error("Pick a due date"); return; }
     try {
       await api.post("/follow-ups", { lead_id: leadId, due_at: new Date(fuAt).toISOString(), kind: fuKind });
-      toast.success("Follow-up scheduled");
-      setFuOpen(false); setFuAt("");
-      load();
-    } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail));
-    }
+      toast.success("Follow-up scheduled"); setFuOpen(false); setFuAt(""); load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const stage = STAGE_META.find((s) => s.key === lead.stage);
@@ -113,13 +251,15 @@ export default function LeadDetail() {
       </button>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: profile */}
         <div className="lg:col-span-2 space-y-6">
           <div className="border border-[#E6E4DD] bg-white rounded-sm p-6">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <div className="label-caps">Lead profile</div>
-                <h1 className="font-display font-black text-4xl text-forest tracking-tight mt-1">{lead.name}</h1>
+                <div className="flex items-center gap-4 mt-1">
+                  <h1 className="font-display font-black text-4xl text-forest tracking-tight">{lead.name}</h1>
+                  <StarRating value={lead.stars || 0} onChange={setStars} size={20} testIdBase="lead-star" />
+                </div>
                 <div className="flex items-center gap-4 mt-3 text-sm text-forest/70">
                   {lead.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {lead.phone}</span>}
                   {lead.email && <span className="inline-flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> {lead.email}</span>}
@@ -145,7 +285,14 @@ export default function LeadDetail() {
             </div>
           </div>
 
-          {/* Activity timeline */}
+          {/* Log actions row */}
+          <div className="grid grid-cols-3 gap-3">
+            <LogCallDialog leadId={leadId} onSaved={load} />
+            <LogSmsDialog leadId={leadId} onSaved={load} templates={templates} />
+            <LogEmailDialog leadId={leadId} onSaved={load} />
+          </div>
+
+          {/* Timeline */}
           <div className="border border-[#E6E4DD] bg-white rounded-sm p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -157,9 +304,7 @@ export default function LeadDetail() {
                   <SelectTrigger className="h-8 w-32 rounded-sm border-[#E6E4DD] text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="note">Note</SelectItem>
-                    <SelectItem value="call">Call log</SelectItem>
                     <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                    <SelectItem value="email">Email</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -169,32 +314,45 @@ export default function LeadDetail() {
                 data-testid={LEADS.addNoteInput}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="Log a call, WhatsApp update, or note…"
+                placeholder="Quick note…"
                 className="flex-1 h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest"
                 onKeyDown={(e) => { if (e.key === "Enter") addNote(); }}
               />
               <button data-testid={LEADS.addNoteSubmit} onClick={addNote} className="h-10 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150">Log</button>
             </div>
-            <div className="mt-5 space-y-4 max-h-[420px] overflow-y-auto pr-1">
+            <div className="mt-5 space-y-4 max-h-[520px] overflow-y-auto pr-1">
               {activities.length === 0 && <div className="text-sm text-forest/50 py-6 text-center">No activity yet.</div>}
-              {activities.map((a) => (
-                <div key={a.id} className="flex gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-forest shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-forest">
-                      <span className="font-medium">{a.actor_name || "System"}</span>
-                      <span className="text-forest/50"> · {a.kind.replace(/_/g, " ")}</span>
+              {activities.map((a) => {
+                const Icon = KIND_ICON[a.kind] || Send;
+                const rec = a.meta?.recording_url;
+                return (
+                  <div key={a.id} className="flex gap-3">
+                    <div className="mt-1 h-7 w-7 rounded-sm border border-[#E6E4DD] grid place-items-center text-forest shrink-0">
+                      <Icon className="h-3.5 w-3.5" />
                     </div>
-                    <div className="text-sm text-forest/80 mt-0.5">{a.message}</div>
-                    <div className="text-[11px] text-forest/40 mt-1">{relTime(a.created_at)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-forest">
+                        <span className="font-medium">{a.actor_name || "System"}</span>
+                        <span className="text-forest/50"> · {a.kind.replace(/_/g, " ")}</span>
+                      </div>
+                      <div className="text-sm text-forest/80 mt-0.5">{a.message}</div>
+                      {rec && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <audio controls src={rec} className="h-8" style={{ width: 260 }} />
+                          <a href={rec} download className="text-xs uppercase tracking-[0.15em] font-bold text-forest hover:text-clay transition-colors duration-150 inline-flex items-center gap-1">
+                            <Download className="h-3 w-3" /> Download
+                          </a>
+                        </div>
+                      )}
+                      <div className="text-[11px] text-forest/40 mt-1">{relTime(a.created_at)}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* Right: actions */}
         <div className="space-y-6">
           <div className="border border-[#E6E4DD] bg-white rounded-sm p-6">
             <div className="label-caps mb-3">Move stage</div>
@@ -235,12 +393,11 @@ export default function LeadDetail() {
           </div>
 
           <div className="border border-[#E6E4DD] bg-white rounded-sm p-6 space-y-3">
-            <div className="label-caps">Quick actions</div>
-
+            <div className="label-caps">Schedule</div>
             <Dialog open={visitOpen} onOpenChange={setVisitOpen}>
               <DialogTrigger asChild>
                 <button className="w-full h-10 rounded-sm border border-[#E6E4DD] text-sm text-forest hover:border-forest transition-colors duration-150 inline-flex items-center justify-center gap-2">
-                  <CalendarPlus className="h-4 w-4" /> Schedule site visit
+                  <CalendarPlus className="h-4 w-4" /> Site visit
                 </button>
               </DialogTrigger>
               <DialogContent className="rounded-sm">
@@ -261,9 +418,7 @@ export default function LeadDetail() {
                   </div>
                 </div>
                 <DialogFooter>
-                  <button disabled={scheduling} onClick={scheduleVisit} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150 disabled:opacity-50">
-                    {scheduling ? "Scheduling…" : "Schedule visit"}
-                  </button>
+                  <button onClick={scheduleVisit} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150">Schedule visit</button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -271,7 +426,7 @@ export default function LeadDetail() {
             <Dialog open={fuOpen} onOpenChange={setFuOpen}>
               <DialogTrigger asChild>
                 <button className="w-full h-10 rounded-sm border border-[#E6E4DD] text-sm text-forest hover:border-forest transition-colors duration-150 inline-flex items-center justify-center gap-2">
-                  <BellPlus className="h-4 w-4" /> Set follow-up
+                  <BellPlus className="h-4 w-4" /> Follow-up
                 </button>
               </DialogTrigger>
               <DialogContent className="rounded-sm">

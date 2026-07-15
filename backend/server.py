@@ -202,6 +202,7 @@ class LeadBody(BaseDoc):
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     stage: LeadStage = "new"
+    stars: Optional[int] = 0
 
 
 class UpdateLeadBody(BaseDoc):
@@ -219,6 +220,7 @@ class UpdateLeadBody(BaseDoc):
     stage: Optional[LeadStage] = None
     lost_reason: Optional[str] = None
     priority: Optional[Literal["hot", "warm", "cold"]] = None
+    stars: Optional[int] = None
 
 
 class AssignBody(BaseDoc):
@@ -849,6 +851,496 @@ async def update_settings(body: SettingsBody, actor: dict = Depends(require_role
 
 
 # ---------------------------------------------------------------------------
+# CALL / SMS / EMAIL LOGGING (with recording URL for calls)
+# ---------------------------------------------------------------------------
+class CallLogBody(BaseDoc):
+    direction: Literal["outgoing", "incoming"] = "outgoing"
+    duration_sec: int = 0
+    disposition: Literal["connected", "missed", "busy", "no_answer", "voicemail"] = "connected"
+    recording_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SmsLogBody(BaseDoc):
+    text: str
+    template_id: Optional[str] = None
+
+
+class EmailLogBody(BaseDoc):
+    subject: str
+    body: str
+    template_id: Optional[str] = None
+
+
+@api.post("/leads/{lead_id}/log-call")
+async def log_call(lead_id: str, body: CallLogBody, actor: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    meta = body.model_dump()
+    kind = "outgoing_call" if body.direction == "outgoing" else "incoming_call"
+    if body.disposition in ("missed", "busy", "no_answer"):
+        kind = "missed_call"
+    msg = f"{body.direction.capitalize()} call · {body.disposition} · {body.duration_sec}s"
+    await log_activity(lead_id, actor, kind, msg, meta)
+    return {"ok": True}
+
+
+@api.post("/leads/{lead_id}/log-sms")
+async def log_sms(lead_id: str, body: SmsLogBody, actor: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await log_activity(lead_id, actor, "sms_sent", body.text[:200], body.model_dump())
+    return {"ok": True}
+
+
+@api.post("/leads/{lead_id}/log-email")
+async def log_email(lead_id: str, body: EmailLogBody, actor: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    await log_activity(lead_id, actor, "email_sent", body.subject, body.model_dump())
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# BULK LEAD ALLOCATION
+# ---------------------------------------------------------------------------
+class BulkAssignBody(BaseDoc):
+    lead_ids: List[str]
+    user_id: str
+
+
+@api.post("/leads/bulk-assign")
+async def bulk_assign(body: BulkAssignBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    if not body.lead_ids:
+        raise HTTPException(status_code=400, detail="No leads provided")
+    user = await db.users.find_one({"id": body.user_id}, {"name": 1})
+    if not user:
+        raise HTTPException(status_code=404, detail="Assignee not found")
+    result = await db.leads.update_many(
+        {"id": {"$in": body.lead_ids}},
+        {"$set": {"assigned_to": body.user_id, "updated_at": now_utc().isoformat()}},
+    )
+    for lid in body.lead_ids:
+        await log_activity(lid, actor, "assignment", f"Bulk-assigned to {user.get('name')}")
+    return {"ok": True, "matched": result.matched_count, "modified": result.modified_count}
+
+
+# ---------------------------------------------------------------------------
+# CSV IMPORT
+# ---------------------------------------------------------------------------
+class ImportRow(BaseDoc):
+    name: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    source: Optional[str] = "manual"
+    project_name: Optional[str] = None
+    budget_min: Optional[float] = None
+    budget_max: Optional[float] = None
+    configuration: Optional[str] = None
+    location_pref: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class ImportBody(BaseDoc):
+    rows: List[ImportRow]
+    auto_assign: bool = True
+
+
+@api.post("/leads/import")
+async def import_leads(body: ImportBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    projects = {p["name"].lower(): p["id"] async for p in db.projects.find({}, {"id": 1, "name": 1})}
+    created, failed = 0, 0
+    for row in body.rows:
+        try:
+            pid = projects.get((row.project_name or "").lower())
+            doc = {
+                "id": new_id(),
+                "name": row.name,
+                "phone": row.phone,
+                "email": row.email,
+                "source": row.source if row.source in ("magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in", "manual") else "manual",
+                "project_id": pid,
+                "budget_min": row.budget_min,
+                "budget_max": row.budget_max,
+                "configuration": row.configuration,
+                "location_pref": row.location_pref,
+                "notes": row.notes,
+                "stage": "new",
+                "priority": "warm",
+                "stars": 0,
+                "created_at": now_utc().isoformat(),
+                "updated_at": now_utc().isoformat(),
+            }
+            if body.auto_assign:
+                doc["assigned_to"] = await _pick_auto_assignee()
+            await db.leads.insert_one(doc)
+            await log_activity(doc["id"], actor, "lead_created", "Imported via CSV")
+            created += 1
+        except Exception:
+            failed += 1
+    return {"created": created, "failed": failed}
+
+
+# ---------------------------------------------------------------------------
+# WHATSAPP TEMPLATES
+# ---------------------------------------------------------------------------
+class WATemplateBody(BaseDoc):
+    name: str
+    category: Optional[str] = "general"
+    body: str
+    variables: Optional[List[str]] = None
+    approved: Optional[bool] = False
+
+
+@api.get("/whatsapp-templates")
+async def list_wa_templates(user: dict = Depends(get_current_user)):
+    docs = await db.whatsapp_templates.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return docs
+
+
+@api.post("/whatsapp-templates")
+async def create_wa_template(body: WATemplateBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["created_at"] = now_utc().isoformat()
+    await db.whatsapp_templates.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/whatsapp-templates/{tid}")
+async def update_wa_template(tid: str, body: WATemplateBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    r = await db.whatsapp_templates.update_one({"id": tid}, {"$set": body.model_dump(exclude_none=True)})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return await db.whatsapp_templates.find_one({"id": tid}, {"_id": 0})
+
+
+@api.delete("/whatsapp-templates/{tid}")
+async def delete_wa_template(tid: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    await db.whatsapp_templates.delete_one({"id": tid})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# CHANNEL PARTNERS
+# ---------------------------------------------------------------------------
+class ChannelPartnerBody(BaseDoc):
+    name: str
+    company: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+    city: Optional[str] = None
+    rera: Optional[str] = None
+    commission_pct: Optional[float] = None
+    active: Optional[bool] = True
+    notes: Optional[str] = None
+
+
+@api.get("/channel-partners")
+async def list_partners(user: dict = Depends(get_current_user)):
+    docs = await db.channel_partners.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    for d in docs:
+        d["leads_count"] = await db.leads.count_documents({"channel_partner_id": d["id"]})
+    return docs
+
+
+@api.post("/channel-partners")
+async def create_partner(body: ChannelPartnerBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["created_at"] = now_utc().isoformat()
+    await db.channel_partners.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/channel-partners/{pid}")
+async def update_partner(pid: str, body: ChannelPartnerBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    r = await db.channel_partners.update_one({"id": pid}, {"$set": body.model_dump(exclude_none=True)})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Partner not found")
+    return await db.channel_partners.find_one({"id": pid}, {"_id": 0})
+
+
+@api.delete("/channel-partners/{pid}")
+async def delete_partner(pid: str, actor: dict = Depends(require_roles("admin"))):
+    await db.channel_partners.delete_one({"id": pid})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# PROPOSALS
+# ---------------------------------------------------------------------------
+class ProposalBody(BaseDoc):
+    lead_id: str
+    project_id: Optional[str] = None
+    unit_id: Optional[str] = None
+    amount: float
+    validity_days: Optional[int] = 15
+    status: Optional[Literal["draft", "sent", "accepted", "declined", "expired"]] = "draft"
+    terms: Optional[str] = None
+
+
+class UpdateProposalBody(BaseDoc):
+    amount: Optional[float] = None
+    validity_days: Optional[int] = None
+    status: Optional[Literal["draft", "sent", "accepted", "declined", "expired"]] = None
+    terms: Optional[str] = None
+
+
+@api.get("/proposals")
+async def list_proposals(lead_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {}
+    if lead_id:
+        q["lead_id"] = lead_id
+    docs = await db.proposals.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return docs
+
+
+@api.post("/proposals")
+async def create_proposal(body: ProposalBody, actor: dict = Depends(get_current_user)):
+    doc = body.model_dump()
+    doc["id"] = new_id()
+    doc["created_at"] = now_utc().isoformat()
+    doc["created_by"] = actor["id"]
+    await db.proposals.insert_one(doc)
+    doc.pop("_id", None)
+    await log_activity(body.lead_id, actor, "proposal_created", f"Proposal for ₹{int(body.amount)} created")
+    return doc
+
+
+@api.patch("/proposals/{prop_id}")
+async def update_proposal(prop_id: str, body: UpdateProposalBody, actor: dict = Depends(get_current_user)):
+    update = body.model_dump(exclude_none=True)
+    r = await db.proposals.update_one({"id": prop_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    prop = await db.proposals.find_one({"id": prop_id}, {"_id": 0})
+    if "status" in update:
+        await log_activity(prop["lead_id"], actor, "proposal_" + update["status"], f"Proposal marked {update['status']}")
+    return prop
+
+
+@api.delete("/proposals/{prop_id}")
+async def delete_proposal(prop_id: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    await db.proposals.delete_one({"id": prop_id})
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# DASHBOARD (Month's Updates + Action Items)
+# ---------------------------------------------------------------------------
+def _month_bounds(dt: datetime) -> tuple:
+    start = datetime(dt.year, dt.month, 1, tzinfo=timezone.utc)
+    if dt.month == 12:
+        end = datetime(dt.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        end = datetime(dt.year, dt.month + 1, 1, tzinfo=timezone.utc)
+    return start, end
+
+
+@api.get("/dashboard/monthly")
+async def dashboard_monthly(user: dict = Depends(get_current_user)):
+    """Month's Updates tab data."""
+    scope: dict = {}
+    if user["role"] == "executive":
+        scope["assigned_to"] = user["id"]
+
+    now = now_utc()
+    cur_start, cur_end = _month_bounds(now)
+    prev_dt = cur_start - timedelta(days=1)
+    prev_start, prev_end = _month_bounds(prev_dt)
+
+    def iso(d):
+        return d.isoformat()
+
+    # KPIs current month
+    new_leads = await db.leads.count_documents({**scope, "created_at": {"$gte": iso(cur_start), "$lt": iso(cur_end)}})
+    booked = await db.leads.count_documents({**scope, "stage": "booked", "updated_at": {"$gte": iso(cur_start), "$lt": iso(cur_end)}})
+    # revenue = sum of accepted proposals in month
+    cur_rev_pipe = [
+        {"$match": {"status": "accepted", "created_at": {"$gte": iso(cur_start), "$lt": iso(cur_end)}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]
+    cur_rev_docs = [r async for r in db.proposals.aggregate(cur_rev_pipe)]
+    cur_revenue = cur_rev_docs[0]["total"] if cur_rev_docs else 0
+
+    prev_rev_pipe = [
+        {"$match": {"status": "accepted", "created_at": {"$gte": iso(prev_start), "$lt": iso(prev_end)}}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]
+    prev_rev_docs = [r async for r in db.proposals.aggregate(prev_rev_pipe)]
+    prev_revenue = prev_rev_docs[0]["total"] if prev_rev_docs else 0
+
+    total_leads_m = new_leads or 1
+    conversion = round((booked / total_leads_m) * 100, 2)
+
+    revenue_pct = 0
+    if prev_revenue > 0:
+        revenue_pct = round(((cur_revenue - prev_revenue) / prev_revenue) * 100, 2)
+
+    # Telemetry — last 4 months by activity kind
+    telemetry = []
+    for i in range(3, -1, -1):
+        month_dt = (cur_start.replace(day=15) - timedelta(days=30 * i))
+        ms, me = _month_bounds(month_dt)
+        row = {"label": ms.strftime("%b-%y"), "month": ms.strftime("%Y-%m")}
+        for kind_key, kinds in (
+            ("outgoing_call", ["outgoing_call", "call"]),
+            ("email_sent", ["email_sent", "email"]),
+            ("sms_sent", ["sms_sent"]),
+            ("followup_scheduled", ["followup_scheduled"]),
+        ):
+            row[kind_key] = await db.activities.count_documents({
+                "kind": {"$in": kinds},
+                "created_at": {"$gte": iso(ms), "$lt": iso(me)},
+            })
+        telemetry.append(row)
+
+    # Total lead pipeline (bar) — counts by stage across all-time in scope
+    stages = ["new", "contacted", "qualified", "site_visit", "negotiation", "booked", "lost"]
+    pipeline = []
+    for s in stages:
+        pipeline.append({"stage": s, "count": await db.leads.count_documents({**scope, "stage": s})})
+
+    # Upcoming closures — proposals in draft/sent with validity ending soon OR leads in negotiation
+    closures_raw = await db.leads.find({**scope, "stage": {"$in": ["negotiation", "site_visit"]}}, {"_id": 0}).sort("updated_at", -1).limit(8).to_list(8)
+
+    # Top leads — sorted by stars desc then updated_at
+    top = await db.leads.find({**scope, "stars": {"$gt": 0}}, {"_id": 0}).sort([("stars", -1), ("updated_at", -1)]).limit(6).to_list(6)
+    if len(top) < 6:
+        rest = await db.leads.find({**scope, "stage": {"$nin": ["lost", "booked"]}}, {"_id": 0}).sort("updated_at", -1).limit(6 - len(top)).to_list(6)
+        top = top + [r for r in rest if r["id"] not in {t["id"] for t in top}]
+
+    # Recent inquiries — latest 8 leads
+    recent = await db.leads.find(scope, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8)
+
+    return {
+        "period": {"start": iso(cur_start), "end": iso(cur_end)},
+        "kpi": {"new_leads": new_leads, "revenue": cur_revenue, "booked": booked, "conversion": conversion},
+        "revenue": {"current": cur_revenue, "previous": prev_revenue, "change_pct": revenue_pct},
+        "telemetry": telemetry,
+        "pipeline": pipeline,
+        "top_leads": top,
+        "recent_inquiries": recent,
+        "upcoming_closures": closures_raw,
+    }
+
+
+@api.get("/dashboard/action-items")
+async def dashboard_action_items(user: dict = Depends(get_current_user)):
+    scope: dict = {}
+    if user["role"] == "executive":
+        scope["assigned_to"] = user["id"]
+
+    now = now_utc()
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    def iso(d):
+        return d.isoformat()
+
+    # Missed calls today (activity kind = missed_call)
+    missed = await db.activities.count_documents({
+        "kind": "missed_call",
+        "created_at": {"$gte": iso(day_start), "$lt": iso(day_end)},
+    })
+
+    todays_followups = await db.follow_ups.find({
+        **scope,
+        "status": "pending",
+        "due_at": {"$gte": iso(day_start), "$lt": iso(day_end)},
+    }, {"_id": 0}).sort("due_at", 1).to_list(100)
+
+    scheduled_calls = await db.follow_ups.count_documents({**scope, "status": "pending", "kind": "call"})
+    tasks = await db.follow_ups.count_documents({**scope, "status": "pending", "kind": {"$in": ["meeting", "email", "whatsapp"]}})
+
+    planned_visits = await db.site_visits.find({
+        **scope,
+        "status": "scheduled",
+        "scheduled_at": {"$gte": iso(day_start - timedelta(days=1)), "$lt": iso(day_start + timedelta(days=7))},
+    }, {"_id": 0}).sort("scheduled_at", 1).to_list(100)
+
+    # Leads with no calls done — leads with no activities of call kind
+    lead_docs = await db.leads.find({**scope, "stage": {"$nin": ["booked", "lost"]}}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+    lead_ids = [l["id"] for l in lead_docs]
+    called_ids = set()
+    if lead_ids:
+        pipe = [
+            {"$match": {"lead_id": {"$in": lead_ids}, "kind": {"$in": ["outgoing_call", "call", "incoming_call", "missed_call"]}}},
+            {"$group": {"_id": "$lead_id"}},
+        ]
+        called_ids = {r["_id"] async for r in db.activities.aggregate(pipe)}
+    no_call_leads = [l for l in lead_docs if l["id"] not in called_ids][:12]
+
+    # No follow-up added leads
+    followed_ids = set()
+    if lead_ids:
+        followed = await db.follow_ups.find({"lead_id": {"$in": lead_ids}}, {"lead_id": 1}).to_list(len(lead_ids))
+        followed_ids = {f["lead_id"] for f in followed}
+    no_followup_leads = [l for l in lead_docs if l["id"] not in followed_ids][:12]
+
+    return {
+        "period": {"start": iso(day_start), "end": iso(day_end)},
+        "widgets": {
+            "missed_calls": missed,
+            "todays_followups": len(todays_followups),
+            "scheduled_calls": scheduled_calls,
+            "tasks": tasks,
+        },
+        "todays_followups": todays_followups,
+        "planned_visits": planned_visits,
+        "no_call_leads": no_call_leads,
+        "no_followup_leads": no_followup_leads,
+    }
+
+
+# ---------------------------------------------------------------------------
+# REPORTS (aggregations)
+# ---------------------------------------------------------------------------
+@api.get("/reports/executives")
+async def report_executives(user: dict = Depends(get_current_user)):
+    execs = await db.users.find({"role": "executive"}, {"_id": 0, "password_hash": 0}).to_list(100)
+    rows = []
+    for e in execs:
+        total = await db.leads.count_documents({"assigned_to": e["id"]})
+        booked = await db.leads.count_documents({"assigned_to": e["id"], "stage": "booked"})
+        site_visits = await db.site_visits.count_documents({"assigned_to": e["id"]})
+        pending = await db.follow_ups.count_documents({"assigned_to": e["id"], "status": "pending"})
+        conv = round((booked / total * 100), 1) if total else 0
+        rows.append({
+            "id": e["id"], "name": e["name"], "email": e["email"],
+            "leads": total, "booked": booked, "site_visits": site_visits,
+            "pending_followups": pending, "conversion": conv,
+        })
+    rows.sort(key=lambda r: -r["conversion"])
+    return rows
+
+
+@api.get("/reports/sources")
+async def report_sources(user: dict = Depends(get_current_user)):
+    pipe = [{"$group": {"_id": {"source": "$source", "stage": "$stage"}, "count": {"$sum": 1}}}]
+    rows = {}
+    async for r in db.leads.aggregate(pipe):
+        src = r["_id"]["source"]
+        stg = r["_id"]["stage"]
+        rows.setdefault(src, {"source": src, "total": 0, "booked": 0})
+        rows[src]["total"] += r["count"]
+        if stg == "booked":
+            rows[src]["booked"] += r["count"]
+    out = list(rows.values())
+    for o in out:
+        o["conversion"] = round((o["booked"] / o["total"] * 100), 1) if o["total"] else 0
+    out.sort(key=lambda r: -r["total"])
+    return out
+
+
+
+# ---------------------------------------------------------------------------
 # Mount router & CORS
 # ---------------------------------------------------------------------------
 app.include_router(api)
@@ -1017,6 +1509,7 @@ async def seed_demo():
                 "notes": "",
                 "stage": stage,
                 "priority": rnd.choice(priorities),
+                "stars": rnd.choice([0, 0, 0, 3, 4, 5]),
                 "assigned_to": assignee["id"] if assignee else None,
                 "created_at": created.isoformat(),
                 "updated_at": created.isoformat(),
@@ -1056,6 +1549,87 @@ async def seed_demo():
                 "created_at": now_utc().isoformat(),
             })
 
+    # whatsapp templates
+    if await db.whatsapp_templates.count_documents({}) == 0:
+        seeds = [
+            {"name": "Welcome", "category": "greeting", "body": "Hi {{name}}, thanks for your interest in {{project}}. Our team will connect with you shortly.", "variables": ["name", "project"], "approved": True},
+            {"name": "Site Visit Confirmation", "category": "site_visit", "body": "Hi {{name}}, your site visit to {{project}} is confirmed for {{date}} at {{time}}. Reply YES to confirm.", "variables": ["name", "project", "date", "time"], "approved": True},
+            {"name": "Follow-up Nudge", "category": "followup", "body": "Hi {{name}}, just checking in on your interest in {{project}}. Any questions I can answer?", "variables": ["name", "project"], "approved": True},
+            {"name": "Proposal Sent", "category": "proposal", "body": "Hi {{name}}, we've sent a proposal for {{unit}} at {{project}}. Total: ₹{{amount}}. Valid until {{validity}}.", "variables": ["name", "unit", "project", "amount", "validity"], "approved": False},
+        ]
+        for s in seeds:
+            await db.whatsapp_templates.insert_one({**s, "id": new_id(), "created_at": now_utc().isoformat()})
+
+    # channel partners
+    if await db.channel_partners.count_documents({}) == 0:
+        seeds = [
+            {"name": "Amit Verma", "company": "Verma Realty", "phone": "+91 9800011122", "email": "amit@vermarealty.in", "city": "Bengaluru", "rera": "PRM/KA/2298", "commission_pct": 2.0, "active": True},
+            {"name": "Rekha Nair", "company": "SkyLine Advisors", "phone": "+91 9800011133", "email": "rekha@skyline.in", "city": "Mumbai", "rera": "P51900011232", "commission_pct": 1.75, "active": True},
+            {"name": "Sameer Khan", "company": "Khan Properties", "phone": "+91 9800011155", "email": "sameer@khanprop.in", "city": "Gurugram", "rera": "RC/REP/HARERA/778", "commission_pct": 2.25, "active": True},
+        ]
+        for s in seeds:
+            await db.channel_partners.insert_one({**s, "id": new_id(), "created_at": now_utc().isoformat(), "notes": ""})
+
+    # proposals (accepted → month revenue)
+    if await db.proposals.count_documents({}) == 0:
+        booked = await db.leads.find({"stage": "booked"}, {"_id": 0}).to_list(20)
+        rnd = random.Random(23)
+        for b in booked:
+            await db.proposals.insert_one({
+                "id": new_id(),
+                "lead_id": b["id"],
+                "project_id": b.get("project_id"),
+                "unit_id": None,
+                "amount": rnd.choice([12000000, 18000000, 25000000, 32000000, 48000000]),
+                "validity_days": 15,
+                "status": "accepted",
+                "terms": "Standard terms apply.",
+                "created_by": b.get("assigned_to"),
+                "created_at": now_utc().isoformat(),
+            })
+        # a few in draft/sent for pipeline
+        neg = await db.leads.find({"stage": "negotiation"}, {"_id": 0}).to_list(10)
+        for n in neg[:4]:
+            await db.proposals.insert_one({
+                "id": new_id(),
+                "lead_id": n["id"],
+                "project_id": n.get("project_id"),
+                "unit_id": None,
+                "amount": rnd.choice([15000000, 22000000, 30000000]),
+                "validity_days": 15,
+                "status": rnd.choice(["sent", "draft"]),
+                "terms": "",
+                "created_by": n.get("assigned_to"),
+                "created_at": now_utc().isoformat(),
+            })
+
+    # activities — synthesize outgoing calls / emails / sms across last 4 months so telemetry chart is meaningful
+    if await db.activities.count_documents({"kind": {"$in": ["outgoing_call", "email_sent", "sms_sent"]}}) == 0:
+        all_leads = await db.leads.find({}, {"id": 1, "assigned_to": 1, "_id": 0}).to_list(200)
+        if all_leads:
+            rnd = random.Random(29)
+            now = now_utc()
+            for i in range(220):
+                lead = rnd.choice(all_leads)
+                kind = rnd.choices(["outgoing_call", "email_sent", "sms_sent", "missed_call"], weights=[0.55, 0.20, 0.20, 0.05])[0]
+                days_back = rnd.randint(0, 110)
+                ts = now - timedelta(days=days_back, hours=rnd.randint(0, 23))
+                meta = {}
+                if kind == "outgoing_call":
+                    meta = {"direction": "outgoing", "duration_sec": rnd.randint(20, 480), "disposition": "connected", "recording_url": f"https://cdn.tasko.demo/rec/{new_id()}.mp3"}
+                elif kind == "missed_call":
+                    meta = {"direction": "outgoing", "duration_sec": 0, "disposition": "no_answer"}
+                await db.activities.insert_one({
+                    "id": new_id(),
+                    "lead_id": lead["id"],
+                    "actor_id": lead.get("assigned_to"),
+                    "actor_name": "System",
+                    "kind": kind,
+                    "message": kind.replace("_", " ").title(),
+                    "meta": meta,
+                    "created_at": ts.isoformat(),
+                })
+
 
 @app.on_event("startup")
 async def on_startup():
@@ -1068,6 +1642,10 @@ async def on_startup():
         await db.site_visits.create_index("scheduled_at")
         await db.follow_ups.create_index("due_at")
         await db.activities.create_index("lead_id")
+        await db.activities.create_index("kind")
+        await db.activities.create_index("created_at")
+        await db.proposals.create_index("lead_id")
+        await db.whatsapp_templates.create_index("name")
     except Exception as e:
         log.warning(f"index setup: {e}")
     await seed_demo()

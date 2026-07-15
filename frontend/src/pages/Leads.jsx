@@ -273,15 +273,18 @@ export default function Leads() {
   const [q, setQ] = useState("");
   const [stage, setStage] = useState("");
   const [source, setSource] = useState("");
+  const [execFilter, setExecFilter] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
   const [loading, setLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       const params = {};
-      if (activeId && activeId !== "__all__") params.project_id = activeId;
+      if (projectFilter) params.project_id = projectFilter;
       if (stage) params.stage = stage;
       if (source) params.source = source;
+      if (execFilter) params.assigned_to = execFilter;
       if (q) params.search = q;
       const [leadsR, usersR, projR] = await Promise.all([
         api.get("/leads", { params }),
@@ -296,7 +299,7 @@ export default function Leads() {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [activeId, stage, source, q]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stage, source, q, execFilter, projectFilter]);
 
   const move = async (leadId, newStage) => {
     setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, stage: newStage } : l)));
@@ -360,6 +363,20 @@ export default function Leads() {
           <SelectContent>
             <SelectItem value="__all__">All sources</SelectItem>
             {SOURCES.map((s) => <SelectItem key={s} value={s}>{SOURCE_LABEL[s]}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={execFilter || "__all__"} onValueChange={(v) => setExecFilter(v === "__all__" ? "" : v)}>
+          <SelectTrigger data-testid={LEADS.filterExec} className="w-[160px] h-8 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Executive" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All executives</SelectItem>
+            {users.filter((u) => u.role === "executive").map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={projectFilter || "__all__"} onValueChange={(v) => setProjectFilter(v === "__all__" ? "" : v)}>
+          <SelectTrigger data-testid={LEADS.filterProject} className="w-[180px] h-8 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Project" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">All projects</SelectItem>
+            {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>

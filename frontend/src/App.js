@@ -16,6 +16,12 @@ import SiteVisits from "@/pages/SiteVisits";
 import FollowUps from "@/pages/FollowUps";
 import Team from "@/pages/Team";
 import Settings from "@/pages/Settings";
+import Reports from "@/pages/Reports";
+import DataImport from "@/pages/DataImport";
+import WhatsAppTemplates from "@/pages/WhatsAppTemplates";
+import BulkAllocation from "@/pages/BulkAllocation";
+import ChannelPartners from "@/pages/ChannelPartners";
+import Proposals from "@/pages/Proposals";
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -51,6 +57,12 @@ function AppRoutes() {
         <Route path="inventory" element={<Inventory />} />
         <Route path="site-visits" element={<SiteVisits />} />
         <Route path="follow-ups" element={<FollowUps />} />
+        <Route path="reports" element={<Reports />} />
+        <Route path="data-import" element={<DataImport />} />
+        <Route path="wa-templates" element={<WhatsAppTemplates />} />
+        <Route path="bulk-allocation" element={<BulkAllocation />} />
+        <Route path="partners" element={<ChannelPartners />} />
+        <Route path="proposals" element={<Proposals />} />
         <Route path="team" element={<Team />} />
         <Route path="settings" element={<Settings />} />
       </Route>

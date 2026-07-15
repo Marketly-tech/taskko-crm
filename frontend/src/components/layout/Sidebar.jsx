@@ -2,44 +2,55 @@ import React from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  LayoutDashboard,
-  Users2,
-  Building2,
-  BedDouble,
-  CalendarClock,
-  BellRing,
-  UserCog,
-  Settings as SettingsIcon,
-  LogOut,
+  LayoutDashboard, Users2, Building2, BedDouble, CalendarClock, BellRing,
+  UserCog, Settings as SettingsIcon, LogOut, BarChart3, UploadCloud,
+  MessageSquareText, ShuffleIcon, Handshake, FileText, ChevronDown,
 } from "lucide-react";
-import { NAV } from "@/constants/testIds";
+import { NAV, AUTH } from "@/constants/testIds";
 
-const ITEMS = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, testId: NAV.itemDashboard, end: true },
-  { to: "/leads", label: "Leads", icon: Users2, testId: NAV.itemLeads },
-  { to: "/projects", label: "Projects", icon: Building2, testId: NAV.itemProjects },
-  { to: "/inventory", label: "Inventory", icon: BedDouble, testId: NAV.itemInventory },
-  { to: "/site-visits", label: "Site Visits", icon: CalendarClock, testId: NAV.itemVisits },
-  { to: "/follow-ups", label: "Follow-ups", icon: BellRing, testId: NAV.itemFollowups },
-  { to: "/team", label: "Team", icon: UserCog, testId: NAV.itemTeam, adminOnly: true },
-  { to: "/settings", label: "Settings", icon: SettingsIcon, testId: NAV.itemSettings, adminOnly: true },
+const GROUPS = [
+  {
+    label: "Workspace",
+    items: [
+      { to: "/", label: "Overview", icon: LayoutDashboard, testId: NAV.itemDashboard, end: true },
+      { to: "/leads", label: "Leads", icon: Users2, testId: NAV.itemLeads },
+      { to: "/site-visits", label: "Site Visits", icon: CalendarClock, testId: NAV.itemVisits },
+      { to: "/follow-ups", label: "Follow-ups", icon: BellRing, testId: NAV.itemFollowups },
+    ],
+  },
+  {
+    label: "Project",
+    items: [
+      { to: "/projects", label: "Project Details", icon: Building2, testId: NAV.itemProjects },
+      { to: "/inventory", label: "Inventory", icon: BedDouble, testId: NAV.itemInventory },
+    ],
+  },
+  {
+    label: "My Console",
+    items: [
+      { to: "/reports", label: "Reports", icon: BarChart3, testId: NAV.itemReports },
+      { to: "/data-import", label: "Data Import", icon: UploadCloud, testId: NAV.itemDataImport, role: ["admin", "manager"] },
+      { to: "/wa-templates", label: "WhatsApp Templates", icon: MessageSquareText, testId: NAV.itemWATemplates },
+      { to: "/bulk-allocation", label: "Bulk Lead Allocation", icon: ShuffleIcon, testId: NAV.itemBulkAlloc, role: ["admin", "manager"] },
+      { to: "/partners", label: "Channel Partners", icon: Handshake, testId: NAV.itemPartners },
+      { to: "/proposals", label: "Proposals", icon: FileText, testId: NAV.itemProposals },
+      { to: "/team", label: "Team", icon: UserCog, testId: NAV.itemTeam, role: ["admin"] },
+      { to: "/settings", label: "Settings", icon: SettingsIcon, testId: NAV.itemSettings, role: ["admin"] },
+    ],
+  },
 ];
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
-  const location = useLocation();
-  const isAdmin = user?.role === "admin";
 
   return (
     <aside
       data-testid={NAV.sidebar}
-      className="grain relative flex flex-col w-[248px] shrink-0 bg-forest text-white min-h-screen"
+      className="grain relative flex flex-col w-[260px] shrink-0 bg-forest text-white min-h-screen"
     >
-      <div className="relative z-10 px-6 pt-8 pb-10">
+      <div className="relative z-10 px-6 pt-8 pb-6">
         <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-sm bg-wheat text-forest grid place-items-center font-display font-black">
-            T
-          </div>
+          <div className="h-8 w-8 rounded-sm bg-wheat text-forest grid place-items-center font-display font-black">T</div>
           <div>
             <div className="font-display font-black text-xl tracking-tight leading-none">Tasko</div>
             <div className="text-[10px] uppercase tracking-[0.22em] text-white/50 mt-1">Real Estate CRM</div>
@@ -47,32 +58,36 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <nav className="relative z-10 flex-1 px-3 space-y-0.5">
-        <div className="px-3 pb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">Workspace</div>
-        {ITEMS.filter((i) => !i.adminOnly || isAdmin).map((i) => {
-          const Icon = i.icon;
-          return (
-            <NavLink
-              key={i.to}
-              to={i.to}
-              end={i.end}
-              data-testid={i.testId}
-              className={({ isActive }) =>
-                `group flex items-center gap-3 px-3 py-2.5 text-sm rounded-sm transition-colors duration-150 ${
-                  isActive
-                    ? "bg-white/10 text-white"
-                    : "text-white/70 hover:text-white hover:bg-white/5"
-                }`
-              }
-            >
-              <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.75} />
-              <span className="font-medium tracking-tight">{i.label}</span>
-            </NavLink>
-          );
-        })}
+      <nav className="relative z-10 flex-1 px-3 space-y-5 overflow-y-auto pb-6">
+        {GROUPS.map((g) => (
+          <div key={g.label}>
+            <div className="px-3 pb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">{g.label}</div>
+            <div className="space-y-0.5">
+              {g.items.filter((i) => !i.role || i.role.includes(user?.role)).map((i) => {
+                const Icon = i.icon;
+                return (
+                  <NavLink
+                    key={i.to}
+                    to={i.to}
+                    end={i.end}
+                    data-testid={i.testId}
+                    className={({ isActive }) =>
+                      `group flex items-center gap-3 px-3 py-2 text-sm rounded-sm transition-colors duration-150 ${
+                        isActive ? "bg-white/10 text-white" : "text-white/70 hover:text-white hover:bg-white/5"
+                      }`
+                    }
+                  >
+                    <Icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.75} />
+                    <span className="font-medium tracking-tight">{i.label}</span>
+                  </NavLink>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
-      <div className="relative z-10 border-t border-white/10 mx-3 my-4" />
+      <div className="relative z-10 border-t border-white/10 mx-3 my-3" />
 
       <div className="relative z-10 px-4 pb-6">
         <div className="flex items-center gap-3">
@@ -84,7 +99,7 @@ export default function Sidebar() {
             <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{user?.role}</div>
           </div>
           <button
-            data-testid={NAV ? "auth-logout-btn" : ""}
+            data-testid={AUTH.logoutBtn}
             onClick={logout}
             className="p-1.5 rounded-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors duration-150"
             title="Log out"
