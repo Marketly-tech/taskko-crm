@@ -1455,7 +1455,8 @@ async def _initiate_twilio_call(lead: dict, actor: dict) -> dict:
             recording_status_callback_method="POST",
         )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Twilio error: {e}")
+        # Return HTTP 400 (not 502) so the preview gateway does not rewrite the JSON body.
+        raise HTTPException(status_code=400, detail=f"Twilio error: {e}")
 
     await db.activities.insert_one({
         "id": activity_id,
@@ -1509,7 +1510,14 @@ def _twilio_verify(request: Request, form_dict: dict) -> bool:
     if not _twilio_validator:
         return True
     sig = request.headers.get("X-Twilio-Signature", "")
-    url = str(request.url)
+    # Rebuild URL against BACKEND_PUBLIC_URL so signature matches what Twilio signed,
+    # regardless of ingress / proxy stripping the scheme/host.
+    if BACKEND_PUBLIC_URL:
+        url = BACKEND_PUBLIC_URL.rstrip("/") + request.url.path
+        if request.url.query:
+            url += "?" + request.url.query
+    else:
+        url = str(request.url)
     return _twilio_validator.validate(url, form_dict, sig)
 
 
@@ -1561,7 +1569,7 @@ async def twilio_status_callback(request: Request):
                 "due_at": due.isoformat(),
                 "kind": "call",
                 "notes": f"Auto-scheduled after {call_status} call",
-                "assigned_to": act.get("actor_id"),
+                "assigned_to": act.get("actor_id") or (await db.leads.find_one({"id": act["lead_id"]}, {"assigned_to": 1}) or {}).get("assigned_to"),
                 "status": "pending",
                 "created_at": now_utc().isoformat(),
                 "meta": {"auto": True, "source_call_sid": key_sid},
@@ -1582,7 +1590,7 @@ async def twilio_recording_callback(request: Request):
     recording_url = form.get("RecordingUrl")
     recording_sid = form.get("RecordingSid")
     duration = form.get("RecordingDuration")
-    if recording_url and not recording_url.endswith(".mp3"):
+    if recording_url and not recording_url.lower().endswith((".mp3", ".wav")):
         recording_url = recording_url + ".mp3"
 
     act = await db.activities.find_one({"meta.call_sid": key_sid})

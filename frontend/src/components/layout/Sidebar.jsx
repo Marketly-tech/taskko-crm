@@ -7,7 +7,7 @@ import {
   UserCog, Settings as SettingsIcon, LogOut, BarChart3, UploadCloud,
   MessageSquareText, ShuffleIcon, Handshake, FileText, User,
 } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { NAV, AUTH } from "@/constants/testIds";
 import { toast } from "sonner";
 
@@ -130,7 +130,10 @@ export default function Sidebar() {
 
       <Dialog open={profileOpen} onOpenChange={setProfileOpen}>
         <DialogContent className="rounded-sm max-w-md">
-          <DialogHeader><DialogTitle className="font-display text-2xl">My profile</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl">My profile</DialogTitle>
+            <DialogDescription className="text-forest/60">Update your details and mobile number used for Twilio call bridging.</DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <div>
               <div className="label-caps mb-1.5">Name</div>

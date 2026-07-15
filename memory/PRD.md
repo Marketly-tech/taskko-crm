@@ -42,7 +42,14 @@ features.
 - Backend: new endpoints `/api/leads/{id}/log-call|log-sms|log-email`, `/api/leads/bulk-assign`, `/api/leads/import`, `/api/whatsapp-templates/*`, `/api/channel-partners/*`, `/api/proposals/*`, `/api/dashboard/monthly`, `/api/dashboard/action-items`, `/api/reports/executives`, `/api/reports/sources`. New collections: `whatsapp_templates`, `channel_partners`, `proposals`. Seed data extended: 4 templates, 3 partners, ~13 proposals, ~220 synthesized activities so telemetry chart is meaningful.
 - Calling API recommendation surfaced in Settings: **Exotel** (recommended India), **MyOperator** (India), **Twilio Voice** (global). All three post recording URLs to Tasko via webhook.
 
-## MOCKED / deferred integrations
+## What's implemented — v1.2 (Feb 2026, iteration 3 – Twilio Voice REST)
+- **Twilio Voice REST** integrated for click-to-call with executive-first bridging. Executive clicks the *Call* button on a lead → Twilio rings the executive's phone → on answer, Twilio dials the lead and records the conversation → status + recording URL webhook back to Tasko.
+- New endpoints: `POST /api/leads/{id}/call`, `GET/POST /api/twilio/twiml/{lead_id}` (public), `POST /api/twilio/status-callback` (signed), `POST /api/twilio/recording-callback` (signed), `GET /api/twilio/status`.
+- Signature validation rebuilt against `BACKEND_PUBLIC_URL` so real Twilio webhooks (which sign the public URL) validate correctly behind ingress.
+- **Auto-call on new lead assignment**: Settings toggle that fires a Twilio bridge as soon as a lead is created (via manual form OR external webhook receiver).
+- **Missed-call follow-up policy**: 8 delay options — 15m / 1h / 2h / 4h / 8h / 1d default / 2d / 3d. Toggleable.
+- **Phone management**: `PATCH /api/users/me` for self-service, Team-page inline phone edit for admins, Sidebar "My profile" modal for everyone.
+- Auto-dialer / predictive calling **deferred**.
 - **WhatsApp** — UI toggles + templates ready; outbound send mocked.
 - **Resend Email** — same.
 - **Google Calendar** — reminder toggle only.
