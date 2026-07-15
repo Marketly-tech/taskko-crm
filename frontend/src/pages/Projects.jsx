@@ -6,7 +6,7 @@ import { PROJECT } from "@/constants/testIds";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
-import { Building2, Plus, MapPin, Home } from "lucide-react";
+import { Building2, Plus, MapPin, Home, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Projects() {
@@ -38,6 +38,43 @@ export default function Projects() {
   };
 
   const canCreate = user?.role === "admin" || user?.role === "manager";
+  const canDelete = user?.role === "admin";
+  const [edit, setEdit] = useState(null); // project being edited
+  const [editForm, setEditForm] = useState({});
+
+  const openEdit = (p) => {
+    setEdit(p);
+    setEditForm({
+      name: p.name, location: p.location, city: p.city || "", rera: p.rera || "",
+      price_min: p.price_min ?? "", price_max: p.price_max ?? "",
+      configurations: (p.configurations || []).join(", "), cover: p.cover || "",
+      description: p.description || "", status: p.status || "active",
+    });
+  };
+
+  const submitEdit = async () => {
+    try {
+      const body = {
+        ...editForm,
+        price_min: editForm.price_min === "" ? null : Number(editForm.price_min),
+        price_max: editForm.price_max === "" ? null : Number(editForm.price_max),
+        configurations: editForm.configurations ? editForm.configurations.split(",").map((s) => s.trim()).filter(Boolean) : [],
+      };
+      await api.patch(`/projects/${edit.id}`, body);
+      toast.success("Project updated");
+      setEdit(null);
+      load(); refresh();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Delete this project and all its units?")) return;
+    try {
+      await api.delete(`/projects/${id}`);
+      toast.success("Project deleted");
+      load(); refresh();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   return (
     <div className="space-y-6">
@@ -119,6 +156,18 @@ export default function Projects() {
               <div className="absolute top-3 left-3 bg-white/95 backdrop-blur text-[10px] uppercase tracking-[0.18em] font-bold text-forest px-2 py-1 rounded-sm">
                 {p.status || "active"}
               </div>
+              {canCreate && (
+                <div className="absolute top-3 right-3 flex items-center gap-1">
+                  <button data-testid={`project-edit-${p.id}`} onClick={() => openEdit(p)} className="bg-white/95 backdrop-blur text-forest hover:bg-white p-1.5 rounded-sm transition-colors duration-150" title="Edit">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  {canDelete && (
+                    <button onClick={() => remove(p.id)} className="bg-white/95 backdrop-blur text-clay hover:bg-white p-1.5 rounded-sm transition-colors duration-150" title="Delete">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             <div className="p-5">
               <div className="flex items-center gap-2 text-xs text-forest/60">
@@ -154,6 +203,58 @@ export default function Projects() {
           </div>
         ))}
       </div>
+
+      {/* Edit dialog */}
+      <Dialog open={!!edit} onOpenChange={(v) => !v && setEdit(null)}>
+        <DialogContent className="rounded-sm max-w-lg">
+          <DialogHeader><DialogTitle className="font-display text-2xl">Edit project</DialogTitle></DialogHeader>
+          {edit && (
+            <div className="space-y-3">
+              <div>
+                <div className="label-caps mb-1.5">Name</div>
+                <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="label-caps mb-1.5">Location</div>
+                  <input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+                </div>
+                <div>
+                  <div className="label-caps mb-1.5">City</div>
+                  <input value={editForm.city} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+                </div>
+                <div>
+                  <div className="label-caps mb-1.5">Price min (₹)</div>
+                  <input type="number" value={editForm.price_min} onChange={(e) => setEditForm({ ...editForm, price_min: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+                </div>
+                <div>
+                  <div className="label-caps mb-1.5">Price max (₹)</div>
+                  <input type="number" value={editForm.price_max} onChange={(e) => setEditForm({ ...editForm, price_max: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+                </div>
+              </div>
+              <div>
+                <div className="label-caps mb-1.5">Configurations (comma sep)</div>
+                <input value={editForm.configurations} onChange={(e) => setEditForm({ ...editForm, configurations: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+              </div>
+              <div>
+                <div className="label-caps mb-1.5">Cover image URL</div>
+                <input value={editForm.cover} onChange={(e) => setEditForm({ ...editForm, cover: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+              </div>
+              <div>
+                <div className="label-caps mb-1.5">RERA #</div>
+                <input value={editForm.rera} onChange={(e) => setEditForm({ ...editForm, rera: e.target.value })} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+              </div>
+              <div>
+                <div className="label-caps mb-1.5">Description</div>
+                <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} className="w-full border border-[#E6E4DD] rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-forest" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <button data-testid="project-edit-submit" onClick={submitEdit} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150">Save</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

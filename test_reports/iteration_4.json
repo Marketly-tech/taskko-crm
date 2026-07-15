@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 4 — Paramantra-style dashboard interactivity + CRUD polish tested end-to-end. Backend: 28/28 pytest cases GREEN in /app/backend/tests/backend_test_v4.py covering (a) GET /dashboard/revenue-breakdown returns {total,by_agent,by_project,period} + 401 unauth + exec-scoped (exec total <= admin total), (b) DELETE /leads/{id} admin=200, manager=403, executive=403, (c) PATCH /leads/{id} admin/manager 200 on any lead, executive 200 on own + 403 with 'You can only edit your own leads' on others, (d) GET /leads scoped for priya (all rows.assigned_to == priya.id), dashboard/monthly kpi scoped, (e) GET /units/export → 200 text/csv + header 'tower,floor,unit_no,config,carpet_area,price,facing,status' + unauthenticated → 401 + executive allowed to export, (f) POST /units/import admin+manager 200, executive 403, bad project_id 404, replace_existing=true wipes existing units (verified 3→1), (g) PATCH /units/{id} admin 200 / executive 403, (h) PATCH /projects/{id} admin+manager 200 / executive 403, (i) regression: /twilio/status configured=true, PATCH /users/me phone, GET /auth/me. Frontend Playwright: (1) dash-kpi-new-leads → /leads?created=this_month PASS, dash-kpi-booked → /leads?stage=booked PASS, dash-kpi-conversion → /leads?stage=booked PASS, dash-kpi-revenue opens RevenueBreakdownDialog with 'By agent' + 'By project' donut sections PASS. (2) Leads page reads URL params: /leads?stage=booked auto-applies stage filter (dropdown shows 'Booked'), /leads?source=magicbricks auto-applies source filter (dropdown shows 'MagicBricks'). (3) Admin LeadDetail shows lead-edit-btn + lead-delete-btn; edit dialog exposes lead-edit-name / lead-edit-phone / lead-edit-email; submit fires PATCH /leads/{id} → 200. (4) Executive priya sees NO lead-delete-btn on her own lead but DOES see lead-edit-btn. (5) Inventory admin: inv-export-btn + inv-import-btn visible, unit-cell-* opens editor with unit-save-btn (64 cells). (6) Inventory executive: inv-export-btn visible (allowed) but inv-import-btn hidden. (7) Projects admin: 3 project cards, 3 project-edit-* pencils visible; clicking opens dialog with project-edit-submit. (8) Projects executive: 0 pencils. (9) Recharts pipeline BarChart click navigated to /leads?stage=new — PASS (bar-click routing verified in real browser).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /dashboard/revenue-breakdown", "issue": "Match uses proposals.created_at (string ISO) with datetime.isoformat() bounds; works because both are lexicographically comparable UTC ISO strings, but if a proposal is stored with a non-UTC / TZ-naive timestamp the range filter will silently drop it. Consider storing all dates as UTC datetime objects or a Mongo Date type."},
+      {"endpoint": "POST /units/import", "issue": "No de-duplication — importing the same CSV twice creates duplicate units (same tower/unit_no). Consider upsert on (project_id, tower, unit_no) when replace_existing=false, or reject duplicates with an error."},
+      {"endpoint": "GET /units/export", "issue": "CSV writer uses naive str.join(',') without quoting — if a unit's facing or config ever contains a comma (e.g. 'North, East') the row breaks. Use csv.writer for safety."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard (Month's Updates)", "issues": ["Recharts logs 'width(-1) height(-1)' warnings on initial load for the LineChart/BarChart because the ResponsiveContainer's parent gets a width < 0 during first paint. Harmless (charts render fine on 2nd frame) but noisy in console."]},
+      {"screen": "Revenue Breakdown Dialog", "issues": ["Radix warning: 'Missing Description or aria-describedby={undefined}' on the RevenueBreakdownDialog and My-profile dialog (Sidebar.jsx). Add <DialogDescription> for a11y."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v4.py",
+    "/app/test_reports/pytest/pytest_results_v4.xml"
+  ],
+  "action_items": [
+    "[Low] Add <DialogDescription> or aria-describedby to RevenueBreakdownDialog + Sidebar profile dialog + LeadDetail edit dialog + Inventory UnitEditor + Import + Project edit dialogs (Radix warnings).",
+    "[Low] Consider upsert semantics on POST /units/import to avoid duplicate (tower,unit_no) rows on re-import (currently only 'replace_existing:true' wipes first).",
+    "[Low] Use csv module to build /units/export CSV to be safe against commas inside string fields.",
+    "[Nit] Recharts 'width(-1) height(-1)' warnings on Dashboard first paint; add minWidth={0} to the parent grid cells or set explicit width on ResponsiveContainer."
+  ],
+  "critical_code_review_comments": [
+    "server.py has grown to ~2060 lines — the /twilio, /dashboard drill-downs and /units import-export sections are begging to be split into routers/twilio.py, routers/dashboard.py, routers/inventory.py.",
+    "Inventory.jsx exportCsv uses window.location.href = `${BACKEND}/api/units/export?...` — this works because cookies are 3rd-party samesite=none, but it means the browser cannot handle a 401 gracefully (user gets a JSON error page). Consider using fetch + blob download so the frontend can catch auth failures and refresh.",
+    "Dashboard.jsx RevenueBreakdownDialog treats total = sum(by_agent) which excludes proposals with null created_by. This can silently under-report vs backend's 'total' if some proposals lack an author.",
+    "Leads.jsx's URL sync effect writes an empty search string when all filters clear (setParams(new URLSearchParams())) — good — but the createdFilter is only initialised from URL once and there is no UI toggle for it; users cannot clear it except by manually editing the URL.",
+    "backend/server.py list_leads does not filter by 'created' timeframe server-side, so /leads?created=this_month bandwidth = full list; the filter is applied client-side (Leads.jsx). Fine for MVP, but for large tenants push the date range into the query.",
+    "delete_lead in server.py silently no-ops on unknown id (delete_one returns deleted_count=0 and no 404). Users won't know if their delete missed. Return 404 when deleted_count == 0.",
+    "update_project uses ProjectBody (all required fields), so PATCH /projects requires 'name' + 'location' in every request — this is a PUT-ish contract, not a real PATCH. Fine but rename or accept partials."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v4.py (new)",
+    "/app/test_reports/pytest/pytest_results_v4.xml"
+  ],
+  "success_rate": {"backend": "100% (28/28)", "frontend": "100% of listed selectors + drilldowns verified (KPI clicks, URL param sync, edit/delete visibility per role, unit editor, import/export, project pencils, pipeline bar click all PASS)"},
+  "test_credentials": "admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123, karan@tasko.com/executive123 — all verified.",
+  "seed_data_creation": "TEST_-prefixed leads/projects/units created and torn down within each test. One TEST_INV project was created for the replace_existing verification and deleted at teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend regression suite for iteration 4 lives at /app/backend/tests/backend_test_v4.py (28 tests, ~6s wall). All Paramantra-style drilldowns + role-based CRUD are verified. Iteration 3 known-issues (Twilio signature validation against internal URL, 502→HTML gateway rewrite) were NOT re-tested here per the review request — main agent noted Twilio is stable. If those get fixed later, rerun backend_test_v3.py. Twilio /status still returns configured:true.",
+  "rca_of_the_issue": "No new bugs found in iteration 4. All 6 features (dashboard interactivity, admin-only delete, executive-scoped edit, exec-only-own-leads, inventory CSV + edit, project edit) are working per spec on both backend and frontend."
+}

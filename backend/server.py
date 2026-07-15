@@ -579,6 +579,12 @@ async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
 
 @api.patch("/leads/{lead_id}")
 async def update_lead(lead_id: str, body: UpdateLeadBody, actor: dict = Depends(get_current_user)):
+    lead = await db.leads.find_one({"id": lead_id})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    # Executives can only edit their own leads. Admin/manager can edit any.
+    if actor["role"] == "executive" and lead.get("assigned_to") != actor["id"]:
+        raise HTTPException(status_code=403, detail="You can only edit your own leads")
     update = body.model_dump(exclude_none=True)
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
@@ -623,7 +629,7 @@ async def add_note(lead_id: str, body: NoteBody, actor: dict = Depends(get_curre
 
 
 @api.delete("/leads/{lead_id}")
-async def delete_lead(lead_id: str, actor: dict = Depends(require_roles("admin", "manager"))):
+async def delete_lead(lead_id: str, actor: dict = Depends(require_roles("admin"))):
     await db.leads.delete_one({"id": lead_id})
     await db.activities.delete_many({"lead_id": lead_id})
     return {"ok": True}
@@ -1613,6 +1619,127 @@ async def twilio_status(user: dict = Depends(get_current_user)):
         "from_number": TWILIO_FROM if _twilio_client else None,
         "webhook_base": BACKEND_PUBLIC_URL,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# DASHBOARD DRILL-DOWNS
+# ---------------------------------------------------------------------------
+@api.get("/dashboard/revenue-breakdown")
+async def dashboard_revenue_breakdown(user: dict = Depends(get_current_user)):
+    """Agent-wise + project-wise revenue split (accepted proposals, current month).
+    Executives see only their own attributions."""
+    now = now_utc()
+    cur_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    if now.month == 12:
+        cur_end = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        cur_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+
+    match: dict = {"status": "accepted", "created_at": {"$gte": cur_start.isoformat(), "$lt": cur_end.isoformat()}}
+    if user["role"] == "executive":
+        match["created_by"] = user["id"]
+
+    # by agent
+    by_agent_pipe = [
+        {"$match": match},
+        {"$group": {"_id": "$created_by", "amount": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]
+    by_agent = []
+    async for r in db.proposals.aggregate(by_agent_pipe):
+        u = await db.users.find_one({"id": r["_id"]}, {"name": 1, "_id": 0}) if r["_id"] else None
+        by_agent.append({
+            "id": r["_id"], "name": (u or {}).get("name") or "Unassigned",
+            "amount": r["amount"], "count": r["count"],
+        })
+    by_agent.sort(key=lambda r: -r["amount"])
+
+    # by project
+    by_project_pipe = [
+        {"$match": match},
+        {"$group": {"_id": "$project_id", "amount": {"$sum": "$amount"}, "count": {"$sum": 1}}},
+    ]
+    by_project = []
+    async for r in db.proposals.aggregate(by_project_pipe):
+        p = await db.projects.find_one({"id": r["_id"]}, {"name": 1, "_id": 0}) if r["_id"] else None
+        by_project.append({
+            "id": r["_id"], "name": (p or {}).get("name") or "Unassigned",
+            "amount": r["amount"], "count": r["count"],
+        })
+    by_project.sort(key=lambda r: -r["amount"])
+
+    total = sum(a["amount"] for a in by_agent)
+    return {"total": total, "by_agent": by_agent, "by_project": by_project, "period": {"start": cur_start.isoformat(), "end": cur_end.isoformat()}}
+
+
+# ---------------------------------------------------------------------------
+# INVENTORY IMPORT / EXPORT
+# ---------------------------------------------------------------------------
+@api.get("/units/export")
+async def export_units(project_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    q = {}
+    if project_id:
+        q["project_id"] = project_id
+    units = await db.units.find(q, {"_id": 0}).sort([("tower", 1), ("floor", 1), ("unit_no", 1)]).to_list(5000)
+    header = "tower,floor,unit_no,config,carpet_area,price,facing,status\n"
+    lines = [header]
+    for u in units:
+        line = ",".join([
+            str(u.get("tower", "")),
+            str(u.get("floor", "")),
+            str(u.get("unit_no", "")),
+            str(u.get("config", "")),
+            str(u.get("carpet_area", "")),
+            str(int(u.get("price") or 0)),
+            str(u.get("facing", "")),
+            str(u.get("status", "")),
+        ])
+        lines.append(line + "\n")
+    body = "".join(lines)
+    fname = f"tasko-units-{project_id or 'all'}.csv"
+    return StarletteResponse(
+        content=body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+class UnitImportRow(BaseDoc):
+    tower: str
+    floor: int
+    unit_no: str
+    config: str
+    carpet_area: Optional[float] = None
+    price: Optional[float] = None
+    facing: Optional[str] = None
+    status: Optional[UnitStatus] = "available"
+
+
+class UnitImportBody(BaseDoc):
+    project_id: str
+    rows: List[UnitImportRow]
+    replace_existing: bool = False
+
+
+@api.post("/units/import")
+async def import_units(body: UnitImportBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    project = await db.projects.find_one({"id": body.project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if body.replace_existing:
+        await db.units.delete_many({"project_id": body.project_id})
+    created, failed = 0, 0
+    for r in body.rows:
+        try:
+            doc = r.model_dump()
+            doc["id"] = new_id()
+            doc["project_id"] = body.project_id
+            doc["created_at"] = now_utc().isoformat()
+            await db.units.insert_one(doc)
+            created += 1
+        except Exception:
+            failed += 1
+    return {"created": created, "failed": failed, "replaced": body.replace_existing}
 
 
 

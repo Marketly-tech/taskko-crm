@@ -2,11 +2,12 @@ import React, { useEffect, useState } from "react";
 import { api, STAGE_META, SOURCE_LABEL, inr, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { DASH } from "@/constants/testIds";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar,
-  Legend, Cell,
+  Legend, Cell, PieChart, Pie,
 } from "recharts";
 import StarRating from "@/components/StarRating";
 import {
@@ -14,9 +15,16 @@ import {
   CalendarPlus, ListTodo, ArrowUpRight, Sparkles, Building2,
 } from "lucide-react";
 
-function Kpi({ label, value, sub, icon: Icon, tone, testId }) {
+const PIE_COLORS = ["#102A20", "#C25934", "#D4A373", "#2D6A4F", "#457B9D", "#8A5A2B", "#5C6661", "#B03A2E"];
+
+function Kpi({ label, value, sub, icon: Icon, tone, testId, onClick }) {
+  const Cmp = onClick ? "button" : "div";
   return (
-    <div data-testid={testId} className="border border-[#E6E4DD] bg-white rounded-sm p-5">
+    <Cmp
+      data-testid={testId}
+      onClick={onClick}
+      className={`text-left w-full border border-[#E6E4DD] bg-white rounded-sm p-5 transition-all duration-200 ${onClick ? "hover:border-forest hover:shadow-[0_2px_0_0_rgba(16,42,32,0.06)] cursor-pointer" : ""}`}
+    >
       <div className="flex items-center justify-between">
         <div className="label-caps">{label}</div>
         <div className={`h-8 w-8 rounded-sm grid place-items-center ${tone === "clay" ? "bg-clay/10 text-clay" : tone === "wheat" ? "bg-wheat/20 text-[#8A5A2B]" : "bg-forest/8 text-forest"}`}>
@@ -25,18 +33,96 @@ function Kpi({ label, value, sub, icon: Icon, tone, testId }) {
       </div>
       <div className="font-display font-black text-4xl text-forest tracking-tight mt-3 leading-none tabular-nums">{value}</div>
       {sub ? <div className="text-xs text-forest/50 mt-2">{sub}</div> : null}
-    </div>
+    </Cmp>
+  );
+}
+
+function RevenueBreakdownDialog({ open, onClose }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    setData(null);
+    api.get("/dashboard/revenue-breakdown").then((r) => setData(r.data));
+  }, [open]);
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="rounded-sm max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">Revenue breakdown · this month</DialogTitle>
+        </DialogHeader>
+        {!data ? (
+          <div className="text-sm text-forest/50 py-8 text-center">Loading…</div>
+        ) : (
+          <>
+            <div className="text-sm text-forest/70">Total accepted revenue: <span className="font-display font-bold text-forest tabular-nums">{inr(data.total)}</span></div>
+            <div className="grid md:grid-cols-2 gap-6 mt-2">
+              <div className="border border-[#E6E4DD] rounded-sm p-4">
+                <div className="label-caps mb-2">By agent</div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={data.by_agent} dataKey="amount" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2}>
+                        {data.by_agent.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => inr(v)} contentStyle={{ border: "1px solid #E6E4DD", borderRadius: 4, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="space-y-1 mt-2">
+                  {data.by_agent.map((a, i) => (
+                    <div key={a.id || i} className="flex items-center justify-between text-xs">
+                      <div className="inline-flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                        {a.name}
+                      </div>
+                      <div className="tabular-nums text-forest">{inr(a.amount)} <span className="text-forest/40">· {a.count}</span></div>
+                    </div>
+                  ))}
+                  {data.by_agent.length === 0 && <div className="text-xs text-forest/50">No accepted proposals this month.</div>}
+                </div>
+              </div>
+              <div className="border border-[#E6E4DD] rounded-sm p-4">
+                <div className="label-caps mb-2">By project</div>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={data.by_project} dataKey="amount" nameKey="name" innerRadius={45} outerRadius={80} paddingAngle={2}>
+                        {data.by_project.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => inr(v)} contentStyle={{ border: "1px solid #E6E4DD", borderRadius: 4, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="space-y-1 mt-2">
+                  {data.by_project.map((p, i) => (
+                    <Link key={p.id || i} to={p.id ? `/leads?project_id=${p.id}` : "/leads"} className="flex items-center justify-between text-xs hover:text-clay transition-colors duration-150">
+                      <div className="inline-flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                        {p.name}
+                      </div>
+                      <div className="tabular-nums text-forest">{inr(p.amount)} <span className="text-forest/40">· {p.count}</span></div>
+                    </Link>
+                  ))}
+                  {data.by_project.length === 0 && <div className="text-xs text-forest/50">No accepted proposals this month.</div>}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function MonthlyTab() {
   const { user } = useAuth();
+  const nav = useNavigate();
   const [data, setData] = useState(null);
+  const [revOpen, setRevOpen] = useState(false);
   useEffect(() => { api.get("/dashboard/monthly").then((r) => setData(r.data)); }, []);
   if (!data) return <div className="text-forest/50 text-sm">Loading…</div>;
 
   const period = `${new Date(data.period.start).toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${new Date(new Date(data.period.end).getTime() - 86400000).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}`;
-  const pipeMax = Math.max(...data.pipeline.map((p) => p.count), 1);
 
   return (
     <div className="space-y-6">
@@ -50,11 +136,13 @@ function MonthlyTab() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi testId={DASH.kpiNewLeads} label="New leads" value={data.kpi.new_leads} sub="This month" icon={Users2} />
-        <Kpi testId={DASH.kpiRevenue} label="Revenue" value={inr(data.kpi.revenue)} sub={data.revenue.change_pct >= 0 ? `↑ ${data.revenue.change_pct}% vs last mo.` : `↓ ${Math.abs(data.revenue.change_pct)}% vs last mo.`} icon={TrendingUp} tone={data.revenue.change_pct >= 0 ? "wheat" : "clay"} />
-        <Kpi testId={DASH.kpiBooked} label="Booked" value={data.kpi.booked} sub="Deals closed" icon={CalendarCheck2} />
-        <Kpi testId={DASH.kpiConversion} label="Conversion" value={`${data.kpi.conversion}%`} sub="Booked / New leads" icon={Sparkles} tone="wheat" />
+        <Kpi testId={DASH.kpiNewLeads} label="New leads" value={data.kpi.new_leads} sub="This month · click to view" icon={Users2} onClick={() => nav("/leads?created=this_month")} />
+        <Kpi testId={DASH.kpiRevenue} label="Revenue" value={inr(data.kpi.revenue)} sub={`${data.revenue.change_pct >= 0 ? "↑" : "↓"} ${Math.abs(data.revenue.change_pct)}% vs last mo. · click to split`} icon={TrendingUp} tone={data.revenue.change_pct >= 0 ? "wheat" : "clay"} onClick={() => setRevOpen(true)} />
+        <Kpi testId={DASH.kpiBooked} label="Booked" value={data.kpi.booked} sub="Deals closed · click to view" icon={CalendarCheck2} onClick={() => nav("/leads?stage=booked")} />
+        <Kpi testId={DASH.kpiConversion} label="Conversion" value={`${data.kpi.conversion}%`} sub="Booked / New leads" icon={Sparkles} tone="wheat" onClick={() => nav("/leads?stage=booked")} />
       </div>
+
+      <RevenueBreakdownDialog open={revOpen} onClose={() => setRevOpen(false)} />
 
       {/* Telemetry + revenue comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -114,7 +202,7 @@ function MonthlyTab() {
               <XAxis dataKey="stage" tick={{ fontSize: 11, fill: "#5C6661" }} tickFormatter={(v) => STAGE_META.find((s) => s.key === v)?.label || v} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "#5C6661" }} axisLine={false} tickLine={false} allowDecimals={false} />
               <Tooltip contentStyle={{ border: "1px solid #E6E4DD", borderRadius: 4, fontSize: 12 }} formatter={(v, _n, item) => [v, STAGE_META.find((s) => s.key === item.payload.stage)?.label]} />
-              <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+              <Bar dataKey="count" radius={[3, 3, 0, 0]} onClick={(payload) => payload?.stage && nav(`/leads?stage=${payload.stage}`)} className="cursor-pointer">
                 {data.pipeline.map((p, i) => (
                   <Cell key={i} fill={STAGE_META.find((s) => s.key === p.stage)?.tone || "#102A20"} />
                 ))}
@@ -187,6 +275,7 @@ function MonthlyTab() {
 }
 
 function ActionItemsTab() {
+  const nav = useNavigate();
   const [data, setData] = useState(null);
   useEffect(() => { api.get("/dashboard/action-items").then((r) => setData(r.data)); }, []);
   if (!data) return <div className="text-forest/50 text-sm">Loading…</div>;
@@ -202,10 +291,10 @@ function ActionItemsTab() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi testId="dash-kpi-missed" label="Missed calls" value={w.missed_calls} sub="Today" icon={PhoneMissed} tone="clay" />
-        <Kpi testId="dash-kpi-followups" label="Today's follow-ups" value={w.todays_followups} sub="Scheduled today" icon={BellRing} />
-        <Kpi testId="dash-kpi-scheduled-calls" label="Scheduled calls" value={w.scheduled_calls} sub="All time" icon={Phone} />
-        <Kpi testId="dash-kpi-tasks" label="Tasks" value={w.tasks} sub="Meetings / emails / WA" icon={ListTodo} tone="wheat" />
+        <Kpi testId="dash-kpi-missed" label="Missed calls" value={w.missed_calls} sub="Today · click to review" icon={PhoneMissed} tone="clay" onClick={() => nav("/leads")} />
+        <Kpi testId="dash-kpi-followups" label="Today's follow-ups" value={w.todays_followups} sub="Scheduled today" icon={BellRing} onClick={() => nav("/follow-ups")} />
+        <Kpi testId="dash-kpi-scheduled-calls" label="Scheduled calls" value={w.scheduled_calls} sub="All time" icon={Phone} onClick={() => nav("/follow-ups")} />
+        <Kpi testId="dash-kpi-tasks" label="Tasks" value={w.tasks} sub="Meetings / emails / WA" icon={ListTodo} tone="wheat" onClick={() => nav("/follow-ups")} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

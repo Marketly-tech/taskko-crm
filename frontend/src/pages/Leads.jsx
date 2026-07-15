@@ -3,13 +3,13 @@ import { api, formatApiError, STAGE_META, SOURCE_LABEL, inr, relTime } from "@/l
 import { useProjects } from "@/contexts/ProjectContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { LEADS } from "@/constants/testIds";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Plus, LayoutGrid, List, Filter, Phone, MessageSquare, Mail } from "lucide-react";
+import { Plus, LayoutGrid, List, Filter, Phone, MessageSquare, Mail, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const SOURCES = Object.keys(SOURCE_LABEL);
@@ -266,16 +266,31 @@ function LeadsTable({ leads, users }) {
 export default function Leads() {
   const { user } = useAuth();
   const { activeId } = useProjects();
+  const [params, setParams] = useSearchParams();
   const [view, setView] = useState("kanban");
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [q, setQ] = useState("");
-  const [stage, setStage] = useState("");
-  const [source, setSource] = useState("");
-  const [execFilter, setExecFilter] = useState("");
-  const [projectFilter, setProjectFilter] = useState("");
+  const [stage, setStage] = useState(params.get("stage") || "");
+  const [source, setSource] = useState(params.get("source") || "");
+  const [execFilter, setExecFilter] = useState(params.get("assigned_to") || "");
+  const [projectFilter, setProjectFilter] = useState(params.get("project_id") || "");
+  const [createdFilter, setCreatedFilter] = useState(params.get("created") || "");
   const [loading, setLoading] = useState(false);
+  const [editLead, setEditLead] = useState(null);
+
+  // Sync filters → URL
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (stage) next.set("stage", stage);
+    if (source) next.set("source", source);
+    if (execFilter) next.set("assigned_to", execFilter);
+    if (projectFilter) next.set("project_id", projectFilter);
+    if (createdFilter) next.set("created", createdFilter);
+    setParams(next, { replace: true });
+    // eslint-disable-next-line
+  }, [stage, source, execFilter, projectFilter, createdFilter]);
 
   const load = async () => {
     setLoading(true);
@@ -291,7 +306,13 @@ export default function Leads() {
         api.get("/users"),
         api.get("/projects"),
       ]);
-      setLeads(leadsR.data);
+      let filtered = leadsR.data;
+      if (createdFilter === "this_month") {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        filtered = filtered.filter((l) => l.created_at >= start);
+      }
+      setLeads(filtered);
       setUsers(usersR.data);
       setProjects(projR.data);
     } finally {
@@ -299,7 +320,7 @@ export default function Leads() {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stage, source, q, execFilter, projectFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stage, source, q, execFilter, projectFilter, createdFilter]);
 
   const move = async (leadId, newStage) => {
     setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, stage: newStage } : l)));

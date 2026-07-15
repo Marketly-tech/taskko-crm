@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { LEADS } from "@/constants/testIds";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
-import { ArrowLeft, Phone, Mail, MessageSquare, CalendarPlus, BellPlus, PhoneCall, Send, PhoneMissed, Download, PhoneOutgoing } from "lucide-react";
+import { ArrowLeft, Phone, Mail, MessageSquare, CalendarPlus, BellPlus, PhoneCall, Send, PhoneMissed, Download, PhoneOutgoing, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import StarRating from "@/components/StarRating";
 
@@ -171,6 +171,93 @@ function LogEmailDialog({ leadId, onSaved }) {
   );
 }
 
+function EditLeadDialog({ lead, projects, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({});
+  useEffect(() => {
+    if (open) setForm({
+      name: lead.name || "", phone: lead.phone || "", email: lead.email || "",
+      configuration: lead.configuration || "", budget_min: lead.budget_min ?? "",
+      budget_max: lead.budget_max ?? "", location_pref: lead.location_pref || "",
+      project_id: lead.project_id || "", priority: lead.priority || "warm",
+      notes: lead.notes || "",
+    });
+  }, [open, lead]);
+  const submit = async () => {
+    try {
+      const body = { ...form };
+      ["email", "phone", "configuration", "location_pref", "notes"].forEach((k) => { if (body[k] === "") delete body[k]; });
+      if (body.budget_min === "" || body.budget_min == null) delete body.budget_min; else body.budget_min = Number(body.budget_min);
+      if (body.budget_max === "" || body.budget_max == null) delete body.budget_max; else body.budget_max = Number(body.budget_max);
+      if (!body.project_id) delete body.project_id;
+      await api.patch(`/leads/${lead.id}`, body);
+      toast.success("Lead updated");
+      setOpen(false);
+      onSaved?.();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button data-testid="lead-edit-btn" className="text-forest/60 hover:text-forest inline-flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] font-bold transition-colors duration-150">
+          <Pencil className="h-3.5 w-3.5" /> Edit
+        </button>
+      </DialogTrigger>
+      <DialogContent className="rounded-sm max-w-lg">
+        <DialogHeader><DialogTitle className="font-display text-2xl">Edit lead</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <F label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} testId="lead-edit-name" />
+            <F label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} testId="lead-edit-phone" />
+          </div>
+          <F label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} testId="lead-edit-email" />
+          <div className="grid grid-cols-2 gap-3">
+            <F label="Configuration" value={form.configuration} onChange={(v) => setForm({ ...form, configuration: v })} />
+            <F label="Location" value={form.location_pref} onChange={(v) => setForm({ ...form, location_pref: v })} />
+            <F label="Budget min (₹)" type="number" value={form.budget_min} onChange={(v) => setForm({ ...form, budget_min: v })} />
+            <F label="Budget max (₹)" type="number" value={form.budget_max} onChange={(v) => setForm({ ...form, budget_max: v })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="label-caps mb-1.5">Project</div>
+              <Select value={form.project_id || "__none__"} onValueChange={(v) => setForm({ ...form, project_id: v === "__none__" ? "" : v })}>
+                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— None —</SelectItem>
+                  {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <div className="label-caps mb-1.5">Priority</div>
+              <Select value={form.priority} onValueChange={(v) => setForm({ ...form, priority: v })}>
+                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="hot">Hot</SelectItem>
+                  <SelectItem value="warm">Warm</SelectItem>
+                  <SelectItem value="cold">Cold</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <button data-testid="lead-edit-submit" onClick={submit} className="h-9 px-4 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150">Save</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function F({ label, value, onChange, type = "text", testId }) {
+  return (
+    <div>
+      <div className="label-caps mb-1.5">{label}</div>
+      <input data-testid={testId} type={type} value={value ?? ""} onChange={(e) => onChange(e.target.value)} className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+    </div>
+  );
+}
+
 export default function LeadDetail() {
   const { leadId } = useParams();
   const nav = useNavigate();
@@ -244,11 +331,30 @@ export default function LeadDetail() {
 
   const stage = STAGE_META.find((s) => s.key === lead.stage);
 
+  const deleteLead = async () => {
+    if (!window.confirm("Delete this lead permanently? This also removes all activity.")) return;
+    try {
+      await api.delete(`/leads/${leadId}`);
+      toast.success("Lead deleted");
+      nav("/leads");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   return (
     <div className="space-y-6">
-      <button onClick={() => nav("/leads")} className="text-xs uppercase tracking-[0.2em] text-forest/60 hover:text-forest inline-flex items-center gap-1.5 transition-colors duration-150">
-        <ArrowLeft className="h-3.5 w-3.5" /> Back to leads
-      </button>
+      <div className="flex items-center justify-between">
+        <button onClick={() => nav("/leads")} className="text-xs uppercase tracking-[0.2em] text-forest/60 hover:text-forest inline-flex items-center gap-1.5 transition-colors duration-150">
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to leads
+        </button>
+        <div className="flex items-center gap-4">
+          <EditLeadDialog lead={lead} projects={projects} onSaved={load} />
+          {user?.role === "admin" && (
+            <button data-testid="lead-delete-btn" onClick={deleteLead} className="text-clay/80 hover:text-clay inline-flex items-center gap-1.5 text-xs uppercase tracking-[0.15em] font-bold transition-colors duration-150">
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
