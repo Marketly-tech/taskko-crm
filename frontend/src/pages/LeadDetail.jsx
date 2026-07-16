@@ -410,7 +410,7 @@ export default function LeadDetail() {
                       duration: 12000,
                       action: {
                         label: "Update phone",
-                        onClick: () => window.location.assign("/team"),
+                        onClick: () => nav("/team"),
                       },
                     });
                   } else {
