@@ -401,7 +401,22 @@ export default function LeadDetail() {
                   if (data.mock) toast.info("Twilio not configured — mock call logged");
                   else toast.success(`Ringing your phone… (${data.status})`);
                   load();
-                } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+                } catch (e) {
+                  const msg = formatApiError(e.response?.data?.detail) || e.message;
+                  const unverified = /unverified|21219|Verified Caller ID/i.test(msg);
+                  const missingPhone = /Set your phone/i.test(msg);
+                  if (unverified || missingPhone) {
+                    toast.error(msg, {
+                      duration: 12000,
+                      action: {
+                        label: "Update phone",
+                        onClick: () => window.location.assign("/team"),
+                      },
+                    });
+                  } else {
+                    toast.error(msg);
+                  }
+                }
               }}
               className="h-10 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150 inline-flex items-center justify-center gap-2 col-span-1"
             >

@@ -1512,6 +1512,20 @@ async def _initiate_twilio_call(lead: dict, actor: dict) -> dict:
             recording_status_callback_method="POST",
         )
     except Exception as e:
+        # Surface a friendlier hint for the most common trial-account failure
+        # so the user knows they need to verify the caller ID in Twilio.
+        msg = str(e)
+        code = getattr(e, "code", None) or getattr(e, "status", None)
+        if "21219" in msg or "unverified" in msg.lower() or code == 21219:
+            hint = (
+                f"Twilio rejected the call: the number {exec_phone} is not "
+                "a Verified Caller ID on this trial account. Add it at "
+                "twilio.com/console/phone-numbers/verified, then retry. "
+                "The lead's number must also be verified until you upgrade."
+            )
+            raise HTTPException(status_code=400, detail=hint)
+        if "21211" in msg or "invalid" in msg.lower() and "phone" in msg.lower():
+            raise HTTPException(status_code=400, detail=f"Twilio: invalid phone number ({exec_phone} or {lead_phone}). Ensure E.164 format like +9198…")
         # Return HTTP 400 (not 502) so the preview gateway does not rewrite the JSON body.
         raise HTTPException(status_code=400, detail=f"Twilio error: {e}")
 

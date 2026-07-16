@@ -12,6 +12,8 @@ export function AuthProvider({ children }) {
       const { data } = await api.get("/auth/me");
       setUser(data);
     } catch (e) {
+      // /auth/me failed — the axios 401 interceptor already attempted a
+      // refresh once; if we're still here, the session is truly gone.
       setUser(false);
     }
   }, []);

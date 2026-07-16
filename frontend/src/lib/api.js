@@ -8,6 +8,32 @@ export const api = axios.create({
   timeout: 20000,
 });
 
+// --- 401 auto-refresh interceptor ---------------------------------------
+// If any request returns 401, try /auth/refresh once and replay the original
+// request. Only bubble the 401 (and let the app kick to /login) if refresh
+// itself fails. Avoids infinite loops with a per-request `_retried` flag.
+let refreshInFlight = null;
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config || {};
+    const status = error.response?.status;
+    const url = original.url || "";
+    const skip = url.includes("/auth/login") || url.includes("/auth/refresh") || url.includes("/auth/logout");
+    if (status !== 401 || original._retried || skip) return Promise.reject(error);
+    original._retried = true;
+    try {
+      refreshInFlight = refreshInFlight || api.post("/auth/refresh");
+      await refreshInFlight;
+      refreshInFlight = null;
+      return api(original);
+    } catch (e) {
+      refreshInFlight = null;
+      return Promise.reject(error);
+    }
+  }
+);
+
 export function formatApiError(detail) {
   if (detail == null) return "Something went wrong. Please try again.";
   if (typeof detail === "string") return detail;
