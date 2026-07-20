@@ -120,10 +120,11 @@ export default function Sidebar() {
           <button
             data-testid={AUTH.logoutBtn}
             onClick={logout}
-            className="p-1.5 rounded-sm text-white/60 hover:text-white hover:bg-white/10 transition-colors duration-150"
-            title="Log out"
+            className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-sm text-white/70 hover:text-white hover:bg-white/10 text-[10px] uppercase tracking-[0.18em] font-bold transition-colors duration-150"
+            title="Sign out of Tasko"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5" />
+            <span>Sign out</span>
           </button>
         </div>
       </div>

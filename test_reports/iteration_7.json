@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 7 — verified the two small enhancements requested: (1) Sidebar Sign Out visible text label, (2) Kanban 3-dot per-card stage move menu. Backend: 19/19 pytest GREEN in /app/backend/tests/backend_test_v7.py — POST /api/leads/{id}/stage moves through all 7 stages (new/contacted/qualified/site_visit/negotiation/booked/lost), persistence verified via GET, invalid stage returns 422, unknown lead returns 404, stage_change activity is logged (with optional note text captured in message), executive Priya can move her own leads, /auth/logout works and subsequent /auth/me returns 401. Frontend Playwright: 6/6 flows PASS — (a) Sidebar renders visible 'Sign out' text next to LogOut icon (data-testid=auth-logout-btn) for admin, clicking it redirects to /login and cookies are cleared; (b) /leads?view=kanban shows 3-dot buttons on every card (54 cards visible for admin); clicking [data-testid=kanban-move-btn-{leadId}] opens a Radix dropdown listing all 7 stages, the card's current stage entry has data-disabled attribute set (aria-disabled='true' + data-disabled) and shows Check icon while the other 6 show ArrowRight; URL remains /leads (does NOT navigate to /leads/{id}); (c) Clicking [data-testid=kanban-move-{id}-to-negotiation] on a card currently in 'new' — the card disappears from the New column and appears in Negotiation without any page reload (new column count 19→18, negotiation 7→8), URL still /leads; backend PATCH via POST /leads/{id}/stage persisted and stage_change activity was recorded; (d) Clicking anywhere on the card BODY (name/phone area) navigates to /leads/{leadId} correctly; (e) Executive Priya login shows 18 leads all assigned to her; her 3-dot menu opens with 7 stage options; (f) List view (view=list) still renders with expected columns Lead/Contact/Source/Stage/Assignee/Budget/Age. No new bugs found. The stopPropagation on the 3-dot button and dropdown content works as expected — no accidental navigation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /leads/{lead_id}/stage", "issue": "The endpoint does not enforce executive-ownership on the stage move (any authenticated user can move any lead). Confirmed as existing behaviour per the review request (do NOT flag as new bug) — noting for documentation."},
+      {"endpoint": "POST /leads/{lead_id}/stage", "issue": "Pydantic model StageBody validation returns 422 for invalid enum values rather than 400. This is standard FastAPI behaviour and the frontend can't hit it (dropdown restricts choices), so it's only a concern for third-party API integrators."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Overview (dashboard first paint)", "issues": ["Recharts still logs 'width(-1) height(-1) of chart should be greater than 0' warnings on initial render (carried from iterations 4/5/6) — cosmetic, doesn't affect functionality."]},
+      {"screen": "Sidebar Sign Out button", "issues": ["The 'Sign out' label uses text-[10px] uppercase tracking-[0.18em] which is quite small (10px). Text is legible against the dark forest sidebar bg but consider bumping to text-[11px] or slightly higher for aging users / accessibility. Not a blocker."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v7.py",
+    "/app/test_reports/pytest/pytest_results_v7.xml"
+  ],
+  "action_items": [
+    "[Optional/Low] Consider adding server-side ownership enforcement on POST /leads/{id}/stage for executive role to prevent API-level moves of leads they don't own (currently only the GET/detail path enforces this). Explicitly out-of-scope per the review request, but flagging for a future security pass.",
+    "[Optional/Cosmetic] The Sign-out label in Sidebar is 10px — could be bumped to 11-12px for readability."
+  ],
+  "critical_code_review_comments": [
+    "Leads.jsx KanbanBoard: the optimistic update in `move()` correctly sets state before the API call and does a `load()` on error to revert — clean pattern. However, if the API call takes >200ms the card visibly jumps twice (once optimistically, then again if server-returned data differs). Consider merging server response into state instead of a naive reload.",
+    "Leads.jsx line 187: `e.target.closest('[data-kanban-menu]')` guards the card onClick from firing when the 3-dot region is clicked. Works, but a cleaner approach is to have the 3-dot wrapper stopPropagation on its onClick (already done on the trigger button, but only there — the wrapper div itself doesn't). Belt-and-suspenders: current code is correct.",
+    "Leads.jsx uses `useNavigate()` inside KanbanBoard but the card container is a `<div>` — screen readers/assistive-tech will not recognize the whole card as a link. Consider making the card `role=\"button\"` + tabIndex=0 + onKeyDown(Enter/Space) for keyboard accessibility.",
+    "Sidebar.jsx sign-out button uses `hover:bg-white/10` — good visual affordance. But there's no focus ring for keyboard users. Add `focus-visible:ring-2 focus-visible:ring-white/40` for accessibility.",
+    "server.py POST /leads/{id}/stage: the `body.stage` value is written directly to the DB without checking it's a valid transition (e.g., lost → booked). Fine for a CRM but worth noting — could add a stage-transition FSM in a future iteration.",
+    "The kanban view fetches all leads and filters client-side by stage. For 500+ leads this could get slow; the API already supports ?stage= but not used in kanban mode. Not urgent for current dataset (~54 leads)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v7.py (new — 19 tests, ~3.2s wall)",
+    "/app/test_reports/pytest/pytest_results_v7.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "100% (6/6 flows: sign-out visible+working, 3-dot opens with 7 stages+disabled current, 3-dot move persists+optimistic UI, no accidental navigation, card body still navigates, exec scoping intact, list-view regression clean)"},
+  "test_credentials": "admin@tasko.com / admin123, priya@tasko.com / executive123, manager@tasko.com / manager123 — all verified working. See /app/memory/test_credentials.md.",
+  "seed_data_creation": "One TEST_kanban_* lead was created via admin session for the stage-move class tests and deleted in the class-scoped fixture teardown. Priya's first lead had its stage temporarily changed and restored inline. No orphan test data left behind.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 7 suite lives at /app/backend/tests/backend_test_v7.py. Run: `python -m pytest backend/tests/backend_test_v7.py -v -o addopts=''` (the pytest.ini enables xdist by default; the -o override disables it so it runs in-process which is faster for this small suite). The 3-dot Kanban menu is now the canonical way to move cards; drag-and-drop still works but was not re-tested end-to-end this iteration (regression should be safe — the drag handlers on the card were untouched by the fix). Auto-EOD-modal was NOT triggered during this test (test times ran outside 18:00 local, so no dismissal needed; the script includes a dismiss guard anyway).",
+  "rca_of_the_issue": "N/A — this iteration is a feature/enhancement verification, not a bug fix. Both enhancements ship correctly: Sign-out now has a visible label (was icon-only) and Kanban cards now have a 3-dot menu that moves the card via POST /leads/{id}/stage with correct activity logging, optimistic UI, and no navigation side-effects."
+}

@@ -3,13 +3,16 @@ import { api, formatApiError, STAGE_META, SOURCE_LABEL, inr, relTime } from "@/l
 import { useProjects } from "@/contexts/ProjectContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { LEADS } from "@/constants/testIds";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Plus, LayoutGrid, List, Filter, Phone, MessageSquare, Mail, Pencil, Trash2 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { Plus, LayoutGrid, List, Filter, Phone, MessageSquare, Mail, Pencil, Trash2, MoreVertical, ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
 
 const SOURCES = Object.keys(SOURCE_LABEL);
@@ -139,6 +142,7 @@ function LeadCreateDialog({ onCreated, users, projects, activeProjectId }) {
 }
 
 function KanbanBoard({ leads, onMove, users }) {
+  const nav = useNavigate();
   const byStage = useMemo(() => {
     const m = Object.fromEntries(STAGE_META.map((s) => [s.key, []]));
     leads.forEach((l) => { if (m[l.stage]) m[l.stage].push(l); });
@@ -174,17 +178,75 @@ function KanbanBoard({ leads, onMove, users }) {
               {byStage[s.key].map((l) => {
                 const owner = users.find((u) => u.id === l.assigned_to);
                 return (
-                  <Link
-                    to={`/leads/${l.id}`}
+                  <div
                     key={l.id}
                     draggable
                     onDragStart={(e) => onDragStart(e, l.id)}
+                    onClick={(e) => {
+                      // ignore clicks that came from the 3-dot menu / its items
+                      if (e.target.closest("[data-kanban-menu]")) return;
+                      nav(`/leads/${l.id}`);
+                    }}
                     data-testid={LEADS.kanbanCard(l.id)}
-                    className="block bg-white border border-[#E6E4DD] rounded-sm p-3 hover:border-forest transition-colors duration-150 cursor-grab active:cursor-grabbing"
+                    className="group relative bg-white border border-[#E6E4DD] rounded-sm p-3 hover:border-forest transition-colors duration-150 cursor-grab active:cursor-grabbing"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="font-medium text-forest text-sm truncate">{l.name}</div>
-                      {l.priority === "hot" && <span className="text-[9px] uppercase font-bold tracking-wider text-clay">Hot</span>}
+                      <div className="font-medium text-forest text-sm truncate flex-1 min-w-0">{l.name}</div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {l.priority === "hot" && <span className="text-[9px] uppercase font-bold tracking-wider text-clay">Hot</span>}
+                        <div data-kanban-menu>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                data-testid={LEADS.kanbanMoveBtn(l.id)}
+                                aria-label="Move card"
+                                onClick={(e) => { e.stopPropagation(); }}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                draggable={false}
+                                className="h-6 w-6 -mr-1 grid place-items-center rounded-sm text-forest/50 hover:text-forest hover:bg-bone-alt/70 opacity-70 group-hover:opacity-100 transition-all duration-150"
+                              >
+                                <MoreVertical className="h-3.5 w-3.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align="end"
+                              className="rounded-sm border-[#E6E4DD] w-56"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <DropdownMenuLabel className="text-[10px] uppercase tracking-[0.18em] text-forest/50 font-bold">
+                                Move to stage
+                              </DropdownMenuLabel>
+                              <DropdownMenuSeparator />
+                              {STAGE_META.map((target) => {
+                                const isCurrent = target.key === l.stage;
+                                return (
+                                  <DropdownMenuItem
+                                    key={target.key}
+                                    disabled={isCurrent}
+                                    data-testid={LEADS.kanbanMoveTo(l.id, target.key)}
+                                    onSelect={async (e) => {
+                                      e.preventDefault();
+                                      if (isCurrent) return;
+                                      await onMove(l.id, target.key);
+                                    }}
+                                    className="text-sm text-forest cursor-pointer data-[disabled]:opacity-50"
+                                  >
+                                    <span className="inline-flex items-center gap-2 flex-1">
+                                      <span className="h-2 w-2 rounded-full" style={{ background: target.tone }} />
+                                      {target.label}
+                                    </span>
+                                    {isCurrent ? (
+                                      <Check className="h-3.5 w-3.5 text-forest/60" />
+                                    ) : (
+                                      <ArrowRight className="h-3.5 w-3.5 text-forest/40" />
+                                    )}
+                                  </DropdownMenuItem>
+                                );
+                              })}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
                     </div>
                     <div className="text-[11px] text-forest/50 mt-0.5 truncate">{l.phone || l.email}</div>
                     <div className="flex items-center justify-between mt-3">
@@ -199,7 +261,7 @@ function KanbanBoard({ leads, onMove, users }) {
                         <div className="text-[11px] text-forest/60 truncate">{owner.name}</div>
                       </div>
                     )}
-                  </Link>
+                  </div>
                 );
               })}
             </div>

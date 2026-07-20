@@ -64,6 +64,8 @@ export const LEADS = {
   rowCheckbox: (id) => `leads-row-check-${id}`,
   kanbanCard: (id) => `kanban-card-${id}`,
   kanbanColumn: (stage) => `kanban-col-${stage}`,
+  kanbanMoveBtn: (id) => `kanban-move-btn-${id}`,
+  kanbanMoveTo: (id, stage) => `kanban-move-${id}-to-${stage}`,
   assignBtn: "lead-assign-btn",
   stageBtn: "lead-stage-btn",
   addNoteBtn: "lead-add-note-btn",
