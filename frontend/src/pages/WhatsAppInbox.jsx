@@ -6,33 +6,29 @@ import { WhatsAppChat } from "@/components/WhatsAppChat";
 import { MessageCircle, RefreshCcw, Search, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
-const inputCls = "h-9 border border-[#E6E4DD] rounded-sm px-3 text-sm bg-white focus:outline-none focus:border-forest w-full";
-
 function WASettings({ status, reload }) {
-  const [f, setF] = useState({ evolution_api_url: "", evolution_api_key: "", evolution_instance_name: "" });
   const [qr, setQr] = useState(null);
-  const save = async () => {
-    try { await api.patch("/whatsapp/settings", Object.fromEntries(Object.entries(f).filter(([, v]) => v))); toast.success("Saved"); reload(); }
-    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-  };
   const getQr = async () => { try { const { data } = await api.get("/whatsapp/qrcode"); setQr(data); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
+  const open = status?.state === "open";
   return (
     <div className="border border-[#E6E4DD] bg-white rounded-sm p-5 grid lg:grid-cols-2 gap-6" data-testid="wa-settings">
       <div className="space-y-3">
-        <div className="font-display font-bold text-lg text-forest">Evolution API connection</div>
-        <div className="text-sm">Status: <b data-testid="wa-state" className={status?.state === "open" ? "text-[#2D6A4F]" : "text-clay"}>{status?.configured ? status.state : "not connected"}</b></div>
-        {[["evolution_api_url", "Server URL"], ["evolution_api_key", "API key"], ["evolution_instance_name", "Instance name"]].map(([k, l]) => (
-          <label key={k} className="block text-xs text-forest/60">{l}<input data-testid={`wa-set-${k}`} type={k === "evolution_api_key" ? "password" : "text"} value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} className={`${inputCls} mt-1`} /></label>
-        ))}
-        <div className="text-[11px] text-forest/50">Leave blank to keep the keys added for the whole app.</div>
-        <button data-testid="wa-settings-save" onClick={save} className="h-9 px-4 rounded-sm bg-forest text-white text-sm hover:bg-forest-soft transition-colors duration-150">Save</button>
+        <div className="font-display font-bold text-lg text-forest">WhatsApp connection</div>
+        <div className="text-sm">Status: <b data-testid="wa-state" className={open ? "text-[#2D6A4F]" : "text-clay"}>{status?.configured ? (open ? "connected" : status.state.replace(/_/g, " ")) : "not configured"}</b>
+          {status?.instance && <span className="text-forest/60"> · instance <code>{status.instance}</code></span>}
+        </div>
+        {status?.help && <div data-testid="wa-state-help" className="text-xs text-clay bg-clay/5 border border-clay/20 rounded-sm px-3 py-2">{status.help}</div>}
+        <div className="text-[11px] text-forest/50">Server details are managed securely on the server (EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME) and never stored in the app.</div>
+        <div className="flex gap-2">
+          {status?.configured && !open && <button data-testid="wa-qr-btn" onClick={getQr} className="h-9 px-4 rounded-sm bg-forest text-white text-sm hover:bg-forest-soft transition-colors duration-150">Show QR to link phone</button>}
+          <button data-testid="wa-status-refresh" onClick={reload} className="h-9 px-4 rounded-sm border border-[#E6E4DD] text-sm hover:border-forest transition-colors duration-150 inline-flex items-center gap-2"><RefreshCcw className="h-3.5 w-3.5" /> Check status</button>
+        </div>
+        {qr?.base64 && <img data-testid="wa-qr-img" src={qr.base64} alt="WhatsApp QR" className="h-56 w-56" />}
+        {qr?.pairing_code && <div className="text-sm">Pairing code: <b>{qr.pairing_code}</b></div>}
       </div>
       <div className="space-y-3">
         <div className="label-caps">Webhook URL (set in Evolution for MESSAGES_UPSERT)</div>
         <code data-testid="wa-webhook-url" className="block text-xs bg-bone-alt/60 p-2 rounded-sm break-all">{status?.webhook_url}</code>
-        <button data-testid="wa-qr-btn" onClick={getQr} className="h-9 px-4 rounded-sm border border-[#E6E4DD] text-sm hover:border-forest transition-colors duration-150">Show QR to link phone</button>
-        {qr?.base64 && <img data-testid="wa-qr-img" src={qr.base64} alt="WhatsApp QR" className="h-56 w-56" />}
-        {qr?.pairing_code && <div className="text-sm">Pairing code: <b>{qr.pairing_code}</b></div>}
       </div>
     </div>
   );

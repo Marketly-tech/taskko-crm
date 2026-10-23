@@ -17,12 +17,6 @@ class WASendBody(BaseDoc):
     file_name: Optional[str] = "image.jpg"
 
 
-class WASettingsBody(BaseDoc):
-    evolution_api_url: Optional[str] = None
-    evolution_api_key: Optional[str] = None
-    evolution_instance_name: Optional[str] = None
-
-
 def wa_digits(num) -> str:
     d = "".join(ch for ch in str(num or "") if ch.isdigit())
     return f"91{d}" if len(d) == 10 else d
@@ -33,14 +27,15 @@ def jid_of(num) -> str:
 
 
 async def wa_cfg() -> dict:
-    s = await db.settings.find_one({"id": "singleton"}, {"_id": 0}) or {}
+    """Evolution API credentials come only from backend environment variables."""
+    s = await db.settings.find_one({"id": "singleton"}, {"_id": 0, "wa_webhook_secret": 1}) or {}
     if not s.get("wa_webhook_secret"):
         s["wa_webhook_secret"] = pysecrets.token_urlsafe(16)
         await db.settings.update_one({"id": "singleton"}, {"$set": {"wa_webhook_secret": s["wa_webhook_secret"]}}, upsert=True)
     return {
-        "url": (s.get("evolution_api_url") or os.environ.get("EVOLUTION_API_URL", "")).rstrip("/"),
-        "key": s.get("evolution_api_key") or os.environ.get("EVOLUTION_API_KEY", ""),
-        "instance": s.get("evolution_instance_name") or os.environ.get("EVOLUTION_INSTANCE_NAME", ""),
+        "url": os.environ.get("EVOLUTION_API_URL", "").strip().rstrip("/"),
+        "key": os.environ.get("EVOLUTION_API_KEY", "").strip(),
+        "instance": os.environ.get("EVOLUTION_INSTANCE_NAME", "").strip(),
         "secret": s["wa_webhook_secret"],
     }
 
@@ -49,16 +44,60 @@ def _configured(c: dict) -> bool:
     return bool(c["url"] and c["key"] and c["instance"])
 
 
-async def evo(c: dict, method: str, path: str, body: Optional[dict] = None):
+def _evo_error(r: httpx.Response) -> str:
+    try:
+        resp = (r.json() or {}).get("response") or {}
+        msg = resp.get("message")
+        msg = " ".join(str(x) for x in msg) if isinstance(msg, list) else msg
+    except ValueError:
+        msg = None
+    return str(msg or r.text[:200] or f"HTTP {r.status_code}")
+
+
+async def _state(c: dict) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=8) as cl:
+            r = await cl.get(f"{c['url']}/instance/connectionState/{c['instance']}", headers={"apikey": c["key"]})
+    except httpx.HTTPError:
+        return "unreachable"
+    if r.status_code == 404:
+        return "instance_not_found"
+    if r.status_code in (401, 403):
+        return "invalid_api_key"
+    if r.status_code >= 400:
+        return f"error_{r.status_code}"
+    return ((r.json() or {}).get("instance") or {}).get("state", "unknown")
+
+
+STATE_HELP = {
+    "close": "WhatsApp is disconnected on the server. An admin must reconnect it by scanning the QR code (WhatsApp Inbox → Connection).",
+    "connecting": "WhatsApp is still connecting. Finish scanning the QR code, then try again.",
+    "instance_not_found": "The WhatsApp instance set in EVOLUTION_INSTANCE_NAME does not exist on the Evolution server.",
+    "invalid_api_key": "The Evolution API key (EVOLUTION_API_KEY) was rejected.",
+    "unreachable": "The Evolution API server (EVOLUTION_API_URL) could not be reached.",
+}
+
+
+async def evo(c: dict, method: str, path: str, body: Optional[dict] = None, need_open: bool = False):
     if not _configured(c):
-        raise HTTPException(status_code=400, detail="WhatsApp (Evolution API) is not connected yet. An admin needs to add the server details.")
+        raise HTTPException(status_code=503, detail="WhatsApp is not configured on the server (EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME).")
+    if need_open:
+        st = await _state(c)
+        if st != "open":
+            raise HTTPException(status_code=409, detail=STATE_HELP.get(st, f"WhatsApp is not ready (state: {st})."))
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as cl:
             r = await cl.request(method, f"{c['url']}{path}/{c['instance']}", headers={"apikey": c["key"]}, json=body)
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=400, detail=f"Evolution API unreachable: {e.__class__.__name__}")
+        raise HTTPException(status_code=502, detail=f"Evolution API unreachable: {e.__class__.__name__}")
     if r.status_code >= 400:
-        raise HTTPException(status_code=400, detail=f"Evolution API returned HTTP {r.status_code}")
+        msg = _evo_error(r)
+        log.warning("Evolution %s %s -> %s %s", method, path, r.status_code, msg)
+        if "connection closed" in msg.lower():
+            raise HTTPException(status_code=409, detail=STATE_HELP["close"])
+        if r.status_code == 400 and ("exists" in msg.lower() or "number" in msg.lower()):
+            raise HTTPException(status_code=400, detail="This number is not on WhatsApp.")
+        raise HTTPException(status_code=502, detail=f"WhatsApp server error: {msg}")
     try:
         return r.json()
     except ValueError:
@@ -111,10 +150,10 @@ async def _send(jid: str, body: WASendBody, actor: dict) -> dict:
         media = body.media_base64.split(",")[-1] if body.media_base64 else body.media_url
         if body.media_base64 and len(media) > 7_000_000:
             raise HTTPException(status_code=400, detail="Image too large (max 5 MB)")
-        res = await evo(c, "POST", "/message/sendMedia", {"number": number, "mediatype": "image", "mimetype": body.mimetype, "caption": body.text or "", "media": media, "fileName": body.file_name})
+        res = await evo(c, "POST", "/message/sendMedia", need_open=True, body={"number": number, "mediatype": "image", "mimetype": body.mimetype, "caption": body.text or "", "media": media, "fileName": body.file_name})
         kind = "image"
     elif (body.text or "").strip():
-        res = await evo(c, "POST", "/message/sendText", {"number": number, "text": body.text.strip()})
+        res = await evo(c, "POST", "/message/sendText", {"number": number, "text": body.text.strip()}, need_open=True)
         kind = "text"
     else:
         raise HTTPException(status_code=400, detail="Write a message or attach an image")
@@ -151,24 +190,11 @@ async def _lead_jid(lead_id: str, user: dict) -> tuple:
 @router.get("/whatsapp/status")
 async def wa_status(user: dict = Depends(get_current_user)):
     c = await wa_cfg()
-    state = "not_configured"
-    if _configured(c):
-        try:
-            async with httpx.AsyncClient(timeout=8) as cl:
-                r = await cl.get(f"{c['url']}/instance/connectionState/{c['instance']}", headers={"apikey": c["key"]})
-            state = ((r.json() or {}).get("instance") or {}).get("state", "unknown") if r.status_code < 400 else f"error_{r.status_code}"
-        except Exception:
-            state = "unreachable"
+    state = await _state(c) if _configured(c) else "not_configured"
     org = await raw_db.organizations.find_one({"id": user.get("active_organization_id")}, {"_id": 0, "slug": 1}) or {}
     base = os.environ.get("BACKEND_PUBLIC_URL", "").rstrip("/")
-    return {"configured": _configured(c), "state": state, "instance": c["instance"] if is_admin(user) else None,
+    return {"configured": _configured(c), "state": state, "help": STATE_HELP.get(state), "instance": c["instance"] if is_admin(user) else None,
             "webhook_url": f"{base}/api/whatsapp/webhook/{org.get('slug', '')}?secret={c['secret']}" if is_admin(user) else None}
-
-
-@router.patch("/whatsapp/settings")
-async def wa_settings(body: WASettingsBody, actor: dict = Depends(require_roles("admin"))):
-    await db.settings.update_one({"id": "singleton"}, {"$set": {k: v.strip() for k, v in body.model_dump(exclude_none=True).items()}}, upsert=True)
-    return await wa_status(actor)
 
 
 @router.get("/whatsapp/qrcode")
