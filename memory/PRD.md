@@ -25,6 +25,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 
 - Iteration 11 (Jun 2026): Rebrand Tasko → Propzel (UI, titles, EOD email; login emails @tasko.com kept). Overview: one page-level period filter (presets + custom) driving Month's Updates & Action Items; new admin/manager "Team activity · Call report" card (`/api/dashboard/call-report`, user filter); To-do list panel. CallerDesk renamed "Business Campaign" in UI (route /callerdesk kept). Campaign Dialer: stage chips import current stage leads, skip-called-today, auto-start runs CallerDesk batch on create (`/api/callerdesk/campaigns/stage-preview`); campaigns no longer need the provider toggle. WhatsApp template picker in chat composer (inbox + lead). Removed "Calling & recording providers" from Settings.
 
+- Iteration 12 (Jun 2026): **Lead Sources rebuilt** (`routes/lead_sources.py`, page `/lead-sources`). One key per source (api, website, facebook, google_ads, 99acres, magicbricks, housing). Public ingest `/api/v1/leads` (X-API-KEY / Basic / Bearer / ?key) and `/api/v1/leads/{key}` (GET/POST, JSON/form/multipart/XML, Paramantra-compatible fields), `/api/v1/google-ads/{key}`, `/api/v1/meta/{key}` (verify + leadgen → Graph fetch with page token). Duplicate phone (last 10 digits) merges into existing lead (repeat_enquiry activity, enquiry_count). Round-robin per source executives; rep_id override. Live log per source (`lead_events`). Real-time SSE `/api/live/stream` → toast + chime + auto-refresh of Leads (~0.6s). Admin email alert via Resend (needs verified domain). Shareable per-source guide (copy/email/print). Old `/api/webhooks/leads/{source}` removed.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).
@@ -37,6 +39,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 - P2 · Auto-dialer (predictive), Knowledge base, marketing tools, zones/regions.
 - P2 · Store received WhatsApp media in object storage.
 - P2 · Mobile-responsive sidebar.
+- P1 · Verify propzel.tech domain in Resend + set SENDER_EMAIL so admin lead alerts deliver.
+- P2 · Option to hide/clean test leads; require Meta app secret in production.
 - P2 · Make EOD / Business Campaign "today" cards follow the page period; shadcn calendar for custom range.
 - P2 · Optionally rename seeded login emails to @propzel.com.
 

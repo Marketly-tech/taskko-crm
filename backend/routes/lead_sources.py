@@ -241,8 +241,22 @@ async def _email_admins(lead: dict, src: dict, repeat: bool) -> None:
         log.warning("lead alert email failed: %s", e)
 
 
+_locks: dict = {}
+
+
 async def ingest(src: dict, raw: dict, ip: str = "", test: bool = False) -> tuple:
     """Create or merge a lead from any source payload. Returns (http_status, body)."""
+    last10 = re.sub(r"\D", "", str(map_payload(raw)["phone"] or ""))[-10:]
+    lock = _locks.setdefault(f"{src['organization_id']}:{last10}", asyncio.Lock())
+    try:
+        async with lock:
+            return await _ingest(src, raw, ip, test)
+    finally:
+        if not lock.locked() and not getattr(lock, "_waiters", None):
+            _locks.pop(f"{src['organization_id']}:{last10}", None)
+
+
+async def _ingest(src: dict, raw: dict, ip: str, test: bool) -> tuple:
     started = time.perf_counter()
     if not src.get("active", True):
         await _log_event(src, "rejected", raw, started, message="Source is paused", ip=ip)
@@ -256,7 +270,7 @@ async def ingest(src: dict, raw: dict, ip: str = "", test: bool = False) -> tupl
     existing = await db.leads.find_one({"phone": {"$regex": f"{last10}$"}}, {"_id": 0})
     enquiry = {k: m[k] for k in ("project", "configuration", "location", "notes", "subject") if m.get(k)}
     if existing:
-        await db.leads.update_one({"id": existing["id"]}, {"$set": {"updated_at": now, "last_enquiry_at": now}, "$inc": {"enquiry_count": 1}})
+        await db.leads.update_one({"id": existing["id"]}, [{"$set": {"updated_at": now, "last_enquiry_at": now, "enquiry_count": {"$add": [{"$ifNull": ["$enquiry_count", 1]}, 1]}}}])
         await log_activity(existing["id"], None, "repeat_enquiry", f"Repeat enquiry via {src['name']}" + (f" · {m['notes']}" if m.get("notes") else ""),
                            {"source_id": src["id"], "enquiry": enquiry, "raw": raw})
         if existing.get("assigned_to"):
@@ -419,6 +433,8 @@ async def update_source(sid: str, body: SourcePatch, user: dict = Depends(requir
     upd = body.model_dump(exclude_none=True)
     if "name" in upd and not upd["name"].strip():
         raise HTTPException(status_code=400, detail="Name is required")
+    if upd.get("executive_ids") and await db.users.count_documents({"id": {"$in": upd["executive_ids"]}, "role": "executive"}) != len(set(upd["executive_ids"])):
+        raise HTTPException(status_code=400, detail="Rotation list must contain executives of this organisation")
     if upd.get("meta_page_token"):
         upd.update(await _meta_connect(upd["meta_page_token"].strip()))
     await db.lead_sources.update_one({"id": sid}, {"$set": upd})

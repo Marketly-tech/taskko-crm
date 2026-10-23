@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 12 - Lead Sources (Paramantra-style universal lead API + website/FB/Google/portal sources). Backend: 26/26 pytest pass (admin CRUD + RBAC, ingest via X-API-KEY/Basic/Bearer/?key=/path key, JSON/form/multipart/XML/GET, Paramantra field mapping, 201/200/400/401/403 codes, duplicate merge across phone formats with enquiry_count+repeat_enquiry activity, round-robin alternation + rep_id override, Google Ads payload + google_key mismatch 401, Meta verify challenge/403 + webhook logs 'error' w/o token, rotate-key old key 401, delete, org isolation vs Skyline admin, SSE delivery admin 0.58s, exec only own leads with masked phone). Also ran 5 concurrent same-phone posts -> single lead (no dup this run). Frontend: Lead Sources page, add dialog (7 type cards), card copy rows, guide dialog per type (Google webhook+key, FB callback+verify token, API guide w/ X-API-KEY/phonefax/curl), copy/email/print present, Send test lead -> 'New live lead' toast, live log dialog, active toggle, rotation chips, reset key (confirm), delete (admin only; manager has no delete btn), Meta bad token shows Meta error toast. Live alert on /leads: lead pushed via API -> toast in 0.64s and kanban updated in 0.65s (admin) / 0.45s (executive, masked phone). Settings shows settings-lead-sources-link, old webhook list gone, /api/webhooks/leads/{source} returns 404/405.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "_email_admins (Resend)", "issue": "RESEND_API_KEY IS set (not mocked) but every lead alert email fails: 'You can only send testing emails to your own email address ... verify a domain at resend.com/domains'. Admin emails are NOT delivered. Needs verified sending domain (e.g. propzel.tech) + SENDER_EMAIL on that domain."},
+      {"endpoint": "ingest duplicate check", "issue": "Duplicate detection is find-then-insert with no unique index/lock; concurrent identical submissions could create 2 leads (did not reproduce with 5 parallel requests, but not guaranteed). Consider unique index on (organization_id, phone_last10) or upsert."},
+      {"endpoint": "ingest duplicate on legacy leads", "issue": "$inc enquiry_count on older leads lacking the field yields 1 instead of 2 (should $inc from implicit 1, e.g. set default via $ifNull pipeline)."},
+      {"endpoint": "PATCH /api/lead-sources/{id}", "issue": "executive_ids not validated (accepts 'not-a-user' -> 200). Ignored at assign time, but should 400."},
+      {"endpoint": "POST /api/v1/meta/{key}", "issue": "If meta_app_secret not set, webhook accepts unsigned POSTs (anyone with URL can trigger Graph fetches). Acceptable but recommend requiring app secret in production."},
+      {"endpoint": "POST /api/lead-sources/{id}/test", "issue": "Test leads (is_test) are real leads that appear in the pipeline/kanban and counts; no cleanup. Consider filtering is_test or auto-delete."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Route /lead-sources", "issue": "Executive can open /lead-sources directly (nav hidden but route unguarded); page renders with 'Insufficient permissions' toasts x2 and empty state. Add role guard/redirect.", "selector": "[data-testid='lead-sources-page']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v12_lead_sources.py", "/app/test_reports/pytest/pytest_results_v12.xml"],
+  "action_items": [
+    "Verify a Resend sending domain and set SENDER_EMAIL on it so admin lead alert emails are delivered (currently all fail with 403 testing-mode error)",
+    "Add role guard on /lead-sources route for executives",
+    "Optional hardening: unique index for duplicate phone per org, validate executive_ids belong to org, exclude is_test leads from pipeline"
+  ],
+  "critical_code_review_comments": [
+    "SSE polls Mongo every 0.5s per connected client (raw_db.lead_events) - fine for MVP; add index on lead_events(organization_id, created_at) and consider change streams/pubsub at scale",
+    "SSE 'since' uses ISO string $gt; events with identical timestamp could be skipped (very unlikely)",
+    "_meta_connect calls me.json()/sub.json() without guarding non-JSON responses -> potential 500",
+    "_email_admins sends one email with all admins in 'to' (admins see each other's addresses); consider bcc"
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v12_lead_sources.py"],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "~95% (all flows pass; minor route guard issue)"},
+  "seed_data_creation": "Created many TEST_-prefixed leads (TEST_Ravi Kumar, TEST_RR, TEST_SSE_*, TEST_Live*, TEST_ExecLive, Test Lead NNN) in Tasko org; test lead sources were deleted. Existing sources Agency API / Facebook & Instagram Lead Ads / Website form left intact (FB card had invalid token attempt only - rejected, not saved).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app/backend && REACT_APP_BACKEND_URL=... pytest tests/backend_test_v12_lead_sources.py -n 0 (pytest.ini adds xdist). Org1 sources: Agency API id 1598f7bc..., FB 2bf83958..., Website 45e4c831.... Resend key is set but domain unverified -> email failures in backend.out.log 'lead alert email failed'.",
+  "test_credentials": "From /app/memory/test_credentials.md (admin/manager/priya/neha/skyline admin all worked). Note: credentials file still documents the removed /api/webhooks/leads/{source} endpoint - should be updated."
+}

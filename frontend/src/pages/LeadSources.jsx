@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { TYPE_META } from "@/lib/leadSourceGuides";
@@ -44,10 +45,12 @@ export default function LeadSources() {
   const [adding, setAdding] = useState(false); const [guide, setGuide] = useState(null); const [log, setLog] = useState(null);
   const load = () => api.get("/lead-sources").then((r) => setItems(r.data.items)).catch((e) => toast.error(formatApiError(e.response?.data?.detail)));
   useEffect(() => {
+    if (user?.role === "executive") return undefined;
     load(); api.get("/users").then((r) => setUsers(r.data)).catch(() => {});
     window.addEventListener("propzel:new-lead", load);
     return () => window.removeEventListener("propzel:new-lead", load);
   }, []);
+  if (user && !["admin", "manager", "super_admin"].includes(user.role)) return <Navigate to="/" replace />;
   const replace = (s) => setItems((xs) => xs.map((x) => (x.id === s.id ? { ...x, ...s } : x)));
   return (
     <div className="space-y-6" data-testid="lead-sources-page">
