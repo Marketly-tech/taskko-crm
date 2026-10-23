@@ -35,6 +35,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 
 - Iteration 18 (Jun 2026): CallerDesk keys env-only (CALLERDESK_AUTHCODE / VIRTUAL_NUMBER / WEBHOOK_SECRET); settings form + PATCH /api/callerdesk/settings + provider switch removed; lead Call button and auto-call always use CallerDesk. Webhook URL shows real org slug.
 
+- Iteration 19 (Jun 2026): CallerDesk webhook maps real payload (CallSid, CallRecordingUrl, TalkDuration, Status, SourceNumber, DialWhomNumber, Direction); recordings merge onto the lead timeline activity (audio player + download); later callbacks never wipe recording/status/duration. Super Admin = no trace: `silent_ctx` set in get_current_user skips log_activity, create_notification, org audit; Super Admin CallerDesk calls flagged `untracked` (hidden from logs/dashboard, webhooks silent). Historical Super Admin activities deleted.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).

@@ -431,6 +431,7 @@ export default function LeadDetail() {
               <div>
                 <div className="label-caps">Activity</div>
                 <h3 className="font-display font-bold text-xl text-forest tracking-tight mt-1">Timeline</h3>
+                {user?.role === "super_admin" && <div data-testid="timeline-superadmin-hint" className="text-[11px] text-clay mt-1">You're signed in as Super Admin — your actions are not tracked or shown here.</div>}
               </div>
               <div className="flex items-center gap-1">
                 <Select value={noteKind} onValueChange={setNoteKind}>
@@ -473,7 +474,7 @@ export default function LeadDetail() {
                         <div className="mt-2 flex items-center gap-2 flex-wrap" data-testid={`timeline-recording-${a.id}`}>
                           <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-forest/55">Call recording</span>
                           <audio data-testid={`timeline-audio-${a.id}`} controls preload="none" src={rec} className="h-8" style={{ width: 260 }} />
-                          <a href={rec} download className="text-xs uppercase tracking-[0.15em] font-bold text-forest hover:text-clay transition-colors duration-150 inline-flex items-center gap-1">
+                          <a href={rec} download target="_blank" rel="noreferrer" data-testid={`timeline-download-${a.id}`} className="text-xs uppercase tracking-[0.15em] font-bold text-forest hover:text-clay transition-colors duration-150 inline-flex items-center gap-1">
                             <Download className="h-3 w-3" /> Download
                           </a>
                         </div>

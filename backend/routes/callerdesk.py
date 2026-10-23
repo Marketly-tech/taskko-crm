@@ -392,7 +392,8 @@ async def callerdesk_webhook(request: Request, org: Optional[str] = None):
     sid = pick("sid_id", "call_sid", "callsid", "id")
     raw_dur = str(pick("talkduration", "talk_duration", "callduration", "total_duration", "duration") or 0)
     duration = int(float(raw_dur)) if raw_dur.replace(".", "", 1).isdigit() else 0
-    status = normalize_status(pick("callstatus", "status"), duration)
+    raw_status = pick("callstatus", "status")
+    status = normalize_status(raw_status, duration) if raw_status else None
     flow = str(pick("callresult", "flow_type", "direction") or "").upper()
     direction = "outgoing" if flow in {"WEBOBD", "CLICK-TO-CALL", "CLICK_TO_CALL", "OUTGOING", "OBD"} else "incoming"
     p_from = pick("caller_num", "sourcenumber", "from")
@@ -401,6 +402,8 @@ async def callerdesk_webhook(request: Request, org: Optional[str] = None):
     call = await db.callerdesk_calls.find_one({"call_sid": sid}, {"_id": 0}) if sid else None
     if call:
         direction = call.get("direction") or direction
+        duration = duration or int(call.get("duration_sec") or 0)
+    status = status or (call or {}).get("status") or "initiated"
     lead = await db.leads.find_one({"id": call["lead_id"]}, {"_id": 0}) if call and call.get("lead_id") else None
     if not lead and direction == "incoming" and digits(p_from, True):
         lead = await db.leads.find_one({"phone": {"$regex": f"{digits(p_from, True)}$"}}, {"_id": 0})

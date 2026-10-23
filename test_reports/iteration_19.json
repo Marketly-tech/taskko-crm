@@ -1,0 +1,36 @@
+{
+  "summary": "Tested CallerDesk call recordings on the lead timeline and the Super Admin no-trace rule. Backend: 6/6 new pytest pass. Regression suites v12 (lead sources) and v19 (CallerDesk env keys) pass 38/38. Webhook with CallerDesk's real payload (SourceNumber/CallSid/CallRecordingUrl/TalkDuration/Status ANSWER/Direction IVR) creates one incoming_call activity on the matching lead (last 10 digits), with meta.recording_url, status connected and duration 32 (TalkDuration). A 2nd webhook for the same CallSid without a recording keeps recording_url in both the activity and callerdesk_calls, and no duplicate activity is created. A webhook for an existing outgoing call_sid updates the same activity (same id, kind outgoing_call). Super Admin in org1 created a lead (assigned to karan), changed stage, added a note, created a follow-up and a site visit, PATCHed the lead, logged a call and called the lead. None of this created activities or notifications for karan. Call-logs and the CallerDesk dashboard do not include it, and dashboard call-report counts did not change. A webhook for an untracked (super admin) call_sid stays silent. Super Admin organisation create/update writes no audit activities. The same actions by a normal admin produce lead_created, stage_change, note, followup_scheduled, site_visit_scheduled and outgoing_call activities, plus notifications and a call-log entry. Frontend: the lead timeline shows timeline-recording-<id> with a 'Call recording' label, an <audio controls> element with the SoundHelix src that actually plays (currentTime advanced), and a Download link. A Super Admin quick note via the UI does not appear on the timeline and is not stored.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/callerdesk/webhook (save_call merge)", "issue": "A later webhook for the same CallSid that has no Status or duration (for example a recording-only or bare callback) overwrites the activity meta.status to 'initiated' and duration_sec to 0. normalize_status(None) returns 'initiated', and 0 is not filtered out in the merge. callerdesk_calls.status is overwritten the same way. Fix: skip status when the raw status is missing, and skip duration when it is 0 and the previous value was greater than 0."},
+      {"endpoint": "activities collection (historical)", "issue": "37 activities created by Super Admin before this change still exist (26 organization_updated, 8 organization_created, 2 lead_created, 1 site_visit_scheduled). They still show in /api/super-admin/audit-logs and on lead timelines. Consider a one-time cleanup: db.activities.deleteMany({actor_id: <super_admin_id>})."},
+      {"endpoint": "scheduler notifications (routes/notifications.py)", "issue": "Follow-ups and site visits created by Super Admin are stored normally. The background jobs (followup_due, sitevisit_reminder) will later notify the assigned executive about them. This is arguably expected, but it is a trace of Super Admin actions."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "LeadDetail (Super Admin)", "issues": ["Super Admin quick notes and stage changes return ok but nothing appears on the timeline. There is no hint such as 'Super Admin actions are not tracked', which may confuse the user."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v20_recording_superadmin_silent.py", "/app/test_reports/pytest/pytest_v20.xml"],
+  "action_items": [
+    "In save_call/webhook, do not overwrite an existing status or duration with defaults when the follow-up webhook lacks them",
+    "Optional: purge the 37 historical Super Admin activities so the 'no trace' rule also holds for past data",
+    "Optional: show a small 'Super Admin — actions not tracked' hint on LeadDetail"
+  ],
+  "critical_code_review_comments": [
+    "silent_ctx is set in get_current_user (an async dependency), so it propagates to the handler. Background/scheduler code relies on the default False, which is correct.",
+    "save_call marks calls untracked and the untracked flag is inherited by later webhooks. Good.",
+    "The webhook is unauthenticated when CALLERDESK_WEBHOOK_SECRET is unset, so anyone can inject recordings or activities into leads. Set the secret before go-live."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v20_recording_superadmin_silent.py (new)", "/app/frontend/src/pages/LeadDetail.jsx (added data-testid timeline-download-<id> and target=_blank on the recording Download link)"],
+  "success_rate": {"backend": "100% (6/6 new, 38/38 regression)", "frontend": "100%"},
+  "seed_data_creation": "Created TEST_REC, TEST_SA, TEST_ADM and TEST_UI leads, TEST_sid_* calls and a test-sa-* org; all were cleaned up afterwards. The test temporarily sets the super admin phone to +919111111111 and restores it to ''.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest with -n 0. The v20 test uses local pymongo (MONGO_URL/DB_NAME) to seed calls and check notifications. Super admin has no phone, so a call as super admin needs a phone set temporarily. Org1 (tasko) id is 622f9115-0ee1-4541-86ed-fa389e13199f; karan id is 2222859e-4504-4144-9ed7-7983fa3b68a7.",
+  "test_credentials": "admin@tasko.com/admin123, superadmin@tasko.com/superadmin123, karan@tasko.com/executive123 (from /app/memory/test_credentials.md)"
+}
