@@ -90,18 +90,21 @@ def _find(resp, keys: set):
 
 async def save_call(lead, actor, *, call_sid, direction, status, phone_from, phone_to, duration=0, recording_url=None, campaign_id=None, campaign_number_id=None, raw=None) -> str:
     now = now_utc().isoformat()
+    untracked = silent_ctx.get() or (actor or {}).get("role") == "super_admin"
     doc = {"provider": "callerdesk", "call_sid": call_sid, "lead_id": (lead or {}).get("id"), "lead_name": (lead or {}).get("name"),
            "actor_id": (actor or {}).get("id"), "actor_name": (actor or {}).get("name") or "CallerDesk", "direction": direction,
            "status": status, "duration_sec": duration, "phone_from": phone_from, "phone_to": phone_to, "recording_url": recording_url,
            "campaign_id": campaign_id, "campaign_number_id": campaign_number_id, "raw": raw or {}, "updated_at": now}
     existing = await db.callerdesk_calls.find_one({"call_sid": call_sid}) if call_sid else None
+    untracked = untracked or bool((existing or {}).get("untracked"))
+    doc["untracked"] = untracked
     if existing:
         await db.callerdesk_calls.update_one({"id": existing["id"]}, {"$set": {k: v for k, v in doc.items() if v not in (None, "") or k == "status"}})
         call_id = existing["id"]
     else:
         call_id = new_id()
         await db.callerdesk_calls.insert_one({**doc, "id": call_id, "created_at": now})
-    if lead and lead.get("id"):
+    if lead and lead.get("id") and not untracked:
         kind = "missed_call" if status in ("dnp", "busy", "failed") else ("incoming_call" if direction == "incoming" else "outgoing_call")
         meta = {"provider": "callerdesk", "direction": direction, "status": status, "disposition": status, "call_sid": call_sid,
                 "duration_sec": duration, "from": phone_from, "to": phone_to, "recording_url": recording_url, "campaign_id": campaign_id}
@@ -109,6 +112,9 @@ async def save_call(lead, actor, *, call_sid, direction, status, phone_from, pho
                "kind": kind, "message": f"CallerDesk call · {status} · {duration}s", "meta": meta}
         prev = await db.activities.find_one({"meta.call_sid": call_sid}) if call_sid else None
         if prev:
+            old = prev.get("meta") or {}
+            act["meta"] = {**old, **{k: v for k, v in meta.items() if v not in (None, "")}}
+            act["message"] = f"CallerDesk call · {status} · {duration or old.get('duration_sec') or 0}s"
             await db.activities.update_one({"id": prev["id"]}, {"$set": act})
         else:
             await db.activities.insert_one({**act, "id": new_id(), "created_at": now})
@@ -158,7 +164,7 @@ def _mask_rows(rows: list, user: dict, keys=("phone_from", "phone_to", "phone"))
 
 
 def _call_query(status, direction, date_from, date_to, search) -> dict:
-    q: dict = {}
+    q: dict = {"untracked": {"$ne": True}}
     if status and status != "all":
         q["status"] = status
     if direction and direction != "all":
@@ -196,12 +202,12 @@ async def callerdesk_status(user: dict = Depends(get_current_user)):
 async def callerdesk_dashboard(user: dict = Depends(require_roles("admin", "manager"))):
     await _expire_stale()
     now = now_utc()
-    q = {"created_at": {"$gte": datetime(now.year, now.month, now.day, tzinfo=timezone.utc).isoformat()}}
+    q = {"created_at": {"$gte": datetime(now.year, now.month, now.day, tzinfo=timezone.utc).isoformat()}, "untracked": {"$ne": True}}
     total, connected, dnp, failed, active, pending, recent = await asyncio.gather(
         db.callerdesk_calls.count_documents(q), db.callerdesk_calls.count_documents({**q, "status": {"$in": CONNECTED}}),
         db.callerdesk_calls.count_documents({**q, "status": "dnp"}), db.callerdesk_calls.count_documents({**q, "status": {"$in": ["failed", "busy"]}}),
         db.callerdesk_campaigns.count_documents({"status": "active"}), db.callerdesk_campaign_numbers.count_documents({"status": {"$in": PENDING}}),
-        db.callerdesk_calls.find({}, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8),
+        db.callerdesk_calls.find({"untracked": {"$ne": True}}, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8),
     )
     return {"total_calls": total, "connected": connected, "dnp": dnp, "failed": failed, "active_campaigns": active,
             "pending_campaign_calls": pending, "recent": _mask_rows(recent, user)}
@@ -378,13 +384,20 @@ async def callerdesk_webhook(request: Request, org: Optional[str] = None):
     s = await cd_settings()
     if s["webhook_secret"] and s["webhook_secret"] not in (payload.get("secret"), request.headers.get("X-CallerDesk-Secret")):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
-    sid = payload.get("sid_id") or payload.get("call_sid") or payload.get("CallSid") or payload.get("id")
-    raw_dur = str(payload.get("talk_duration") or payload.get("total_duration") or payload.get("duration") or 0)
-    duration = int(raw_dur) if raw_dur.isdigit() else 0
-    status = normalize_status(payload.get("callstatus") or payload.get("status"), duration)
-    direction = "outgoing" if str(payload.get("callresult") or payload.get("Flow_type") or "").upper() in {"WEBOBD", "CLICK-TO-CALL", "CLICK_TO_CALL"} else (payload.get("direction") or "incoming")
-    p_from = payload.get("caller_num") or payload.get("from")
-    p_to = payload.get("member_num") or payload.get("destination_number") or payload.get("to")
+    low = {str(k).lower(): v for k, v in payload.items()}
+
+    def pick(*keys):
+        return next((low[k] for k in keys if low.get(k) not in (None, "")), None)
+
+    sid = pick("sid_id", "call_sid", "callsid", "id")
+    raw_dur = str(pick("talkduration", "talk_duration", "callduration", "total_duration", "duration") or 0)
+    duration = int(float(raw_dur)) if raw_dur.replace(".", "", 1).isdigit() else 0
+    status = normalize_status(pick("callstatus", "status"), duration)
+    flow = str(pick("callresult", "flow_type", "direction") or "").upper()
+    direction = "outgoing" if flow in {"WEBOBD", "CLICK-TO-CALL", "CLICK_TO_CALL", "OUTGOING", "OBD"} else "incoming"
+    p_from = pick("caller_num", "sourcenumber", "from")
+    p_to = pick("member_num", "dialwhomnumber", "destination_number", "destinationnumber", "to")
+    recording = pick("callrecordingurl", "recording_url", "recordingurl", "file", "recording")
     call = await db.callerdesk_calls.find_one({"call_sid": sid}, {"_id": 0}) if sid else None
     if call:
         direction = call.get("direction") or direction
@@ -398,11 +411,11 @@ async def callerdesk_webhook(request: Request, org: Optional[str] = None):
             lead.pop("_id", None)
     actor = await db.users.find_one({"id": call["actor_id"]}, {"_id": 0}) if call and call.get("actor_id") else {"name": "CallerDesk"}
     await save_call(lead, actor, call_sid=sid, direction=direction, status=status, phone_from=p_from, phone_to=p_to, duration=duration,
-                    recording_url=payload.get("file") or payload.get("recording_url"), campaign_id=(call or {}).get("campaign_id"),
+                    recording_url=recording, campaign_id=(call or {}).get("campaign_id"),
                     campaign_number_id=(call or {}).get("campaign_number_id"), raw=payload)
     if call and call.get("campaign_number_id"):
         await db.callerdesk_campaign_numbers.update_one({"id": call["campaign_number_id"]}, {"$set": {"status": status, "duration_sec": duration, "updated_at": now_utc().isoformat()}})
-    if lead:
+    if lead and not (call or {}).get("untracked"):
         for uid in filter(None, dict.fromkeys([lead.get("assigned_to"), *(lead.get("co_assigned_to") or [])])):
             if status in ("dnp", "busy", "failed"):
                 await create_notification(type="missed_call", title="Missed CallerDesk call", message=f"{lead.get('name')} · {status}", user_id=uid,

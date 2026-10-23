@@ -37,6 +37,8 @@ raw_db = client[DB_NAME]
 # Multi-organisation scoping: tenant collections auto-filter by the active org of the request.
 import contextvars  # noqa: E402
 org_ctx: contextvars.ContextVar = contextvars.ContextVar("org_id", default=None)
+# True while a Super Admin request runs: their actions leave no activity, notification or audit trace.
+silent_ctx: contextvars.ContextVar = contextvars.ContextVar("silent", default=False)
 TENANT_COLLECTIONS = {
     "users", "leads", "projects", "units", "site_visits", "follow_ups", "activities", "proposals",
     "channel_partners", "whatsapp_templates", "settings", "notifications", "eod_emails",
@@ -194,6 +196,7 @@ async def get_current_user(request: Request) -> dict:
             raise HTTPException(status_code=403, detail="Your organisation is disabled")
         user["active_organization_id"] = user["organization_id"]
     org_ctx.set(user["active_organization_id"])
+    silent_ctx.set(user.get("role") == "super_admin")
     return user
 
 
@@ -459,6 +462,8 @@ class SettingsBody(BaseDoc):
 # Activity helper
 # ---------------------------------------------------------------------------
 async def log_activity(lead_id: Optional[str], actor: dict, kind: str, message: str, meta: Optional[dict] = None) -> None:
+    if silent_ctx.get() or (actor or {}).get("role") == "super_admin":
+        return
     doc = {
         "id": new_id(),
         "lead_id": lead_id,
@@ -518,6 +523,8 @@ async def create_notification(
 ) -> None:
     """Insert a notification. If dedupe_key given, skip if one already exists
     for the same target and key in the last 24h."""
+    if silent_ctx.get():
+        return
     if dedupe_key:
         since = (now_utc() - timedelta(hours=24)).isoformat()
         exists = await db.notifications.find_one({

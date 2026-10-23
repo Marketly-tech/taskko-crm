@@ -470,8 +470,9 @@ export default function LeadDetail() {
                       </div>
                       <div className="text-sm text-forest/80 mt-0.5">{a.message}</div>
                       {rec && (
-                        <div className="mt-2 flex items-center gap-2">
-                          <audio controls src={rec} className="h-8" style={{ width: 260 }} />
+                        <div className="mt-2 flex items-center gap-2 flex-wrap" data-testid={`timeline-recording-${a.id}`}>
+                          <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-forest/55">Call recording</span>
+                          <audio data-testid={`timeline-audio-${a.id}`} controls preload="none" src={rec} className="h-8" style={{ width: 260 }} />
                           <a href={rec} download className="text-xs uppercase tracking-[0.15em] font-bold text-forest hover:text-clay transition-colors duration-150 inline-flex items-center gap-1">
                             <Download className="h-3 w-3" /> Download
                           </a>

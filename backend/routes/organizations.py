@@ -23,6 +23,8 @@ class OrganizationPatchBody(BaseDoc):
 
 
 async def _audit(actor: dict, kind: str, message: str, org_id: str, meta: Optional[dict] = None) -> None:
+    if actor.get("role") == "super_admin":
+        return
     await raw_db.activities.insert_one({
         "id": new_id(), "lead_id": None, "actor_id": actor["id"], "actor_name": actor.get("name"),
         "kind": kind, "message": message, "meta": {"organization_id": org_id, **(meta or {})},
