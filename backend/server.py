@@ -1,12 +1,12 @@
 """Propzel CRM - FastAPI app entrypoint."""
 from core import *  # noqa: F401,F403
-from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp
+from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp, lead_sources
 from routes.organizations import ensure_organizations, for_each_org
 from routes.eod import send_eod_email_to_admins
 from routes.notifications import refresh_notifications
 
 app = FastAPI(title="Propzel CRM API")
-for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp):
+for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp, lead_sources):
     app.include_router(_m.router)
 
 
@@ -309,6 +309,8 @@ async def on_startup():
         await db.leads.create_index("stage")
         await db.leads.create_index("assigned_to")
         await db.leads.create_index("project_id")
+        await raw_db.lead_sources.create_index("key", unique=True)
+        await raw_db.lead_events.create_index([("organization_id", 1), ("created_at", -1)])
         await db.units.create_index([("project_id", 1), ("tower", 1), ("floor", 1)])
         await db.site_visits.create_index("scheduled_at")
         await db.follow_ups.create_index("due_at")

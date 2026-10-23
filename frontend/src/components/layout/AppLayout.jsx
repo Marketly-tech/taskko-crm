@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
 import AdminEODSummary from "@/components/AdminEODSummary";
+import { LiveLeadAlerts } from "@/components/LiveLeadAlerts";
 
 export default function AppLayout() {
   return (
@@ -15,6 +16,7 @@ export default function AppLayout() {
         </main>
       </div>
       <AdminEODSummary mode="modal-controller" />
+      <LiveLeadAlerts />
     </div>
   );
 }

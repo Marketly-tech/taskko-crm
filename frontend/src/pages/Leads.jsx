@@ -398,6 +398,12 @@ export default function Leads() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [stage, source, q, execFilter, ownerMode, projectFilter, createdFilter]);
+  useEffect(() => {
+    const onLead = () => load();
+    window.addEventListener("propzel:new-lead", onLead);
+    return () => window.removeEventListener("propzel:new-lead", onLead);
+    /* eslint-disable-next-line */
+  }, [stage, source, q, execFilter, ownerMode, projectFilter, createdFilter]);
 
   const move = async (leadId, newStage) => {
     setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, stage: newStage } : l)));

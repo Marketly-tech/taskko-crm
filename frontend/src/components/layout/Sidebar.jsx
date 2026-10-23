@@ -5,7 +5,7 @@ import { api, formatApiError } from "@/lib/api";
 import {
   LayoutDashboard, Users2, Building2, BedDouble, CalendarClock, BellRing,
   UserCog, Settings as SettingsIcon, LogOut, BarChart3, UploadCloud,
-  MessageSquareText, ShuffleIcon, Handshake, FileText, User, Landmark, PhoneCall, MessageCircle,
+  MessageSquareText, ShuffleIcon, Handshake, FileText, User, Landmark, PhoneCall, MessageCircle, RadioTower,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { NAV, AUTH } from "@/constants/testIds";
@@ -41,6 +41,7 @@ const GROUPS = [
     label: "My Console",
     items: [
       { to: "/reports", label: "Reports", icon: BarChart3, testId: NAV.itemReports },
+      { to: "/lead-sources", label: "Lead Sources", icon: RadioTower, testId: "nav-lead-sources", role: ["admin", "manager"] },
       { to: "/data-import", label: "Data Import", icon: UploadCloud, testId: NAV.itemDataImport, role: ["admin", "manager"] },
       { to: "/wa-templates", label: "WhatsApp Templates", icon: MessageSquareText, testId: NAV.itemWATemplates },
       { to: "/bulk-allocation", label: "Bulk Lead Allocation", icon: ShuffleIcon, testId: NAV.itemBulkAlloc, role: ["admin", "manager"] },

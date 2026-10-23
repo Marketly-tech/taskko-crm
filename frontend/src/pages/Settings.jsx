@@ -32,7 +32,6 @@ export default function Settings() {
   if (!s || !tw) return <div className="text-forest/50 text-sm">Loading…</div>;
 
   const set = (k, v) => setS({ ...s, [k]: v });
-  const webhookBase = `${process.env.REACT_APP_BACKEND_URL}/api/webhooks/leads`;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -189,28 +188,13 @@ export default function Settings() {
         )}
       </section>
 
-      <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <Globe className="h-4 w-4 mt-1 text-forest/60" />
-          <div>
-            <div className="font-display font-bold text-xl text-forest tracking-tight">Lead capture webhooks</div>
-            <div className="text-xs text-forest/60 mt-1">Point MagicBricks / 99acres / CommonFloor / Google Ads / Meta lead-gen webhooks to these URLs. Payload fields <code>name, phone, email, project, budget_min, budget_max, configuration, location, message</code>.</div>
-          </div>
+      <section className="border border-[#E6E4DD] bg-white rounded-sm p-6 flex items-center gap-3" data-testid="settings-lead-sources-link">
+        <Globe className="h-4 w-4 text-forest/60" />
+        <div className="flex-1">
+          <div className="font-display font-bold text-xl text-forest tracking-tight">Lead capture</div>
+          <div className="text-xs text-forest/60 mt-1">Website, Facebook & Instagram, Google Ads, 99acres, MagicBricks, Housing.com and agency APIs are now managed in Lead Sources.</div>
         </div>
-        <div className="grid md:grid-cols-2 gap-2">
-          {["magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram"].map((src) => (
-            <div key={src} className="border border-[#E6E4DD] rounded-sm px-3 py-2 flex items-center gap-3">
-              <span className="text-[10px] uppercase tracking-[0.15em] font-bold text-forest/60 w-24 shrink-0">{src}</span>
-              <code className="text-[11px] text-forest/80 truncate flex-1">{webhookBase}/{src}</code>
-              <button
-                onClick={() => { navigator.clipboard.writeText(`${webhookBase}/${src}`); toast.success("Copied"); }}
-                className="text-[10px] uppercase tracking-[0.15em] font-bold text-forest hover:text-clay transition-colors duration-150"
-              >
-                Copy
-              </button>
-            </div>
-          ))}
-        </div>
+        <a href="/lead-sources" className="h-9 px-3 rounded-sm bg-forest text-white text-sm inline-flex items-center">Open Lead Sources</a>
       </section>
 
       <div className="flex justify-end">

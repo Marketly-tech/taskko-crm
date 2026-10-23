@@ -17,6 +17,7 @@ import FollowUps from "@/pages/FollowUps";
 import Team from "@/pages/Team";
 import Settings from "@/pages/Settings";
 import Reports from "@/pages/Reports";
+import LeadSources from "@/pages/LeadSources";
 import DataImport from "@/pages/DataImport";
 import WhatsAppTemplates from "@/pages/WhatsAppTemplates";
 import BulkAllocation from "@/pages/BulkAllocation";
@@ -61,6 +62,7 @@ function AppRoutes() {
         <Route path="site-visits" element={<SiteVisits />} />
         <Route path="follow-ups" element={<FollowUps />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="lead-sources" element={<LeadSources />} />
         <Route path="data-import" element={<DataImport />} />
         <Route path="wa-templates" element={<WhatsAppTemplates />} />
         <Route path="bulk-allocation" element={<BulkAllocation />} />

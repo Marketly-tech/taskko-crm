@@ -30,6 +30,7 @@ const TITLES = {
   "/proposals": "Proposals",
   "/super-admin": "Super Admin",
   "/callerdesk": "Business Campaign",
+  "/lead-sources": "Lead Sources",
 };
 
 export default function Topbar() {

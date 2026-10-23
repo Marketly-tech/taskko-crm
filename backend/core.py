@@ -41,6 +41,7 @@ TENANT_COLLECTIONS = {
     "users", "leads", "projects", "units", "site_visits", "follow_ups", "activities", "proposals",
     "channel_partners", "whatsapp_templates", "settings", "notifications", "eod_emails",
     "wa_messages", "wa_chats", "callerdesk_calls", "callerdesk_campaigns", "message_campaigns",
+    "lead_sources", "lead_events",
 }
 
 
@@ -302,7 +303,7 @@ def clean(doc: dict) -> dict:
 Role = Literal["super_admin", "admin", "manager", "executive"]
 LeadStage = Literal["new", "contacted", "contacted_dnp", "qualified", "qualified_dnp", "site_visit", "site_visit_dnp", "negotiation", "negotiation_dnp", "booked", "lost"]
 ALL_STAGES = ["new", "contacted", "contacted_dnp", "qualified", "qualified_dnp", "site_visit", "site_visit_dnp", "negotiation", "negotiation_dnp", "booked", "lost"]
-LeadSource = Literal["magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in", "manual"]
+LeadSource = Literal["api", "magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in", "manual"]
 UnitStatus = Literal["available", "held", "booked", "sold"]
 VisitStatus = Literal["scheduled", "completed", "no_show", "cancelled"]
 FollowUpStatus = Literal["pending", "done", "missed"]
