@@ -128,7 +128,7 @@ function CampaignsTab() {
     try {
       const { data } = await api.post("/callerdesk/campaigns", { name, stages, skip_called_today: skipToday, auto_start: autoStart, numbers: numbers.split(/[\s,]+/).filter(Boolean), calls_per_minute: Number(cpm) });
       toast.success(data.run ? `Campaign started · ${data.total_numbers} lead(s) imported, ${data.run.started} call(s) dialled` : `Campaign saved · ${data.total_numbers} lead(s) imported`);
-      setName(""); setNumbers(""); setStages([]); load();
+      setName(""); setNumbers(""); setStages([]); setSkipToday(true); setAutoStart(true); load();
     } catch (e) { err(e); } finally { setBusy(false); }
   };
   const act = async (id, type) => {

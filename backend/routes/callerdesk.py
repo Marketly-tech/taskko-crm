@@ -256,7 +256,7 @@ async def stage_leads(stages: List[str], skip_called_today: bool) -> tuple:
     if skip_called_today and leads:
         now = now_utc()
         day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).isoformat()
-        called = set(await db.activities.distinct("lead_id", {"lead_id": {"$in": [x["id"] for x in leads]}, "created_at": {"$gte": day},
+        called = set(await db.activities.distinct("lead_id", {"lead_id": {"$in": [x["id"] for x in leads]}, "created_at": {"$gte": day}, "meta.status": {"$ne": "pending_credentials"},
                                                              "kind": {"$in": ["outgoing_call", "call", "incoming_call", "missed_call"]}}))
         skipped = sum(1 for x in leads if x["id"] in called)
         leads = [x for x in leads if x["id"] not in called]

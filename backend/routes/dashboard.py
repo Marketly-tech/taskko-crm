@@ -81,6 +81,7 @@ async def dashboard_monthly(date_from: Optional[str] = None, date_to: Optional[s
     if prev_revenue > 0:
         revenue_pct = round(((cur_revenue - prev_revenue) / prev_revenue) * 100, 2)
 
+    act_scope = {"actor_id": user["id"]} if user["role"] == "executive" else {}
     # Telemetry — per day (<= 31 days) or per month within the range
     telemetry = []
     for label, ms, me in _buckets(cur_start, cur_end):
@@ -92,6 +93,7 @@ async def dashboard_monthly(date_from: Optional[str] = None, date_to: Optional[s
             ("followup_scheduled", ["followup_scheduled"]),
         ):
             row[kind_key] = await db.activities.count_documents({
+                **act_scope,
                 "kind": {"$in": kinds},
                 "created_at": {"$gte": iso(ms), "$lt": iso(me)},
             })
@@ -143,6 +145,7 @@ async def dashboard_action_items(date_from: Optional[str] = None, date_to: Optio
 
     # Missed calls today (activity kind = missed_call)
     missed = await db.activities.count_documents({
+        **({"actor_id": user["id"]} if user["role"] == "executive" else {}),
         "kind": "missed_call",
         "created_at": {"$gte": iso(day_start), "$lt": iso(day_end)},
     })
@@ -209,14 +212,17 @@ async def dashboard_call_report(date_from: Optional[str] = None, date_to: Option
     if user_id and user_id != "all":
         q["actor_id"] = user_id
 
-    async def count(kinds, extra=None):
-        return await db.activities.count_documents({**q, "kind": {"$in": kinds}, **(extra or {})})
+    real = {"meta.status": {"$ne": "pending_credentials"}}
 
+    async def count(kinds, extra=None):
+        return await db.activities.count_documents({**q, **real, "kind": {"$in": kinds}, **(extra or {})})
+
+    fq = {"created_at": q["created_at"], **({"assigned_to": user_id} if user_id and user_id != "all" else {})}
     outgoing, incoming, missed, sms, email, followups = await asyncio.gather(
         count(["outgoing_call", "call"]), count(["incoming_call"]), count(["missed_call"]),
-        count(["sms_sent"]), count(["email_sent", "email"]), count(["followup_scheduled"]))
+        count(["sms_sent"]), count(["email_sent", "email"]), db.follow_ups.count_documents(fq))
     answered = await count(["outgoing_call", "call", "incoming_call"], {"$or": [{"meta.disposition": {"$in": ANSWERED}}, {"meta.status": {"$in": ANSWERED}}]})
-    unique = len(await db.activities.distinct("lead_id", {**q, "kind": {"$in": CALL_KINDS}, "lead_id": {"$ne": None}}))
+    unique = len(await db.activities.distinct("lead_id", {**q, **real, "kind": {"$in": CALL_KINDS}, "lead_id": {"$ne": None}}))
     return {"period": {"start": start.isoformat(), "end": end.isoformat()},
             "outgoing_calls": outgoing, "answered": answered, "missed": missed, "unique_contacts": unique,
             "incoming": incoming, "sms_sent": sms, "email_sent": email, "followups": followups}

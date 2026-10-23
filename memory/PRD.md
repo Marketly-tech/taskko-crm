@@ -1,4 +1,4 @@
-# Tasko Real Estate CRM — PRD
+# Propzel (formerly Tasko) Real Estate CRM — PRD
 
 ## Original problem statement
 Build "Tasko", a Paramantra-inspired real estate CRM with lead capture from external portals (MagicBricks, CommonFloor, Google Ads, Meta), auto/manual assignment, role-based access, sales funnel, WhatsApp + Email (Resend), auto follow-ups, inventory, site visits, notifications, Admin EOD summary + email.
@@ -23,6 +23,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 - Iteration 9 (Phase 3+4): Reports page with global date range + presets, source performance, outreach telemetry (daily), activity by user, pipeline status by owner, lost-with-reason (+reason chips), exec scorecard, call drill-down, CSV export; Site-visit calendar view. CallerDesk: dashboard, dialer, campaign dialer (start/pause/cancel, per-minute batching), call logs, settings (provider toggle Twilio/CallerDesk, per-org keys), webhook, call report card on Overview.
 - Iteration 10 (Phase 5): WhatsApp via Evolution API — lead WhatsApp section (text, image, sync), WhatsApp Inbox (/whatsapp) with conversations, settings + QR, webhook (messages.upsert), message campaigns (WhatsApp/Email, background delivery with throttle) in CallerDesk.
 
+- Iteration 11 (Jun 2026): Rebrand Tasko → Propzel (UI, titles, EOD email; login emails @tasko.com kept). Overview: one page-level period filter (presets + custom) driving Month's Updates & Action Items; new admin/manager "Team activity · Call report" card (`/api/dashboard/call-report`, user filter); To-do list panel. CallerDesk renamed "Business Campaign" in UI (route /callerdesk kept). Campaign Dialer: stage chips import current stage leads, skip-called-today, auto-start runs CallerDesk batch on create (`/api/callerdesk/campaigns/stage-preview`); campaigns no longer need the provider toggle. WhatsApp template picker in chat composer (inbox + lead). Removed "Calling & recording providers" from Settings.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).
@@ -35,6 +37,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 - P2 · Auto-dialer (predictive), Knowledge base, marketing tools, zones/regions.
 - P2 · Store received WhatsApp media in object storage.
 - P2 · Mobile-responsive sidebar.
+- P2 · Make EOD / Business Campaign "today" cards follow the page period; shadcn calendar for custom range.
+- P2 · Optionally rename seeded login emails to @propzel.com.
 
 ## Test credentials
 See `/app/memory/test_credentials.md`.

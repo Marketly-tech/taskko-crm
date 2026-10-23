@@ -1,0 +1,37 @@
+{
+  "summary": "Tested the new batch: dashboard date-range (monthly/action-items/call-report APIs + UI range bar), Team call report card visibility by role, To-do list panel, Propzel rebrand, Business Campaign rename, stage-based Campaign Dialer (preview, skip-today, auto_start, draft, cancel), WhatsApp template picker in inbox and lead detail, Settings cleanup. Backend 21/21 pytest passed. Every frontend flow that was asked for passed. Found no critical bugs, only minor data/UX notes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/dashboard/call-report", "issue": "'followups' always comes back as 0, even for a range of all time. It counts activities with kind=followup_scheduled, but the seeded follow-ups (25 pending in follow_ups) never created those activities. Only follow-ups created through the ops route will be counted. Consider counting the follow_ups collection by created_at/created_by instead."},
+      {"endpoint": "/api/callerdesk/campaigns (auto_start)", "issue": "Mocked pending_credentials attempts are saved as outgoing_call activities. This inflates the Outgoing calls / Total calls today numbers and also makes those leads count as 'already called today' for later campaign stage previews. In this run, 'today' outgoing went to 8 and 'skipped' to 7 because of test campaigns. Consider excluding status=pending_credentials."},
+      {"endpoint": "/api/dashboard/monthly & action-items", "issue": "The telemetry and missed_calls counts are not scoped for executives: they count activities across the whole org. This was already the case before this batch."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Overview range bar", "issues": ["The custom From/To fields use the browser's native date picker (input type=date) instead of the shadcn Calendar/Popover", "Range is calculated in browser local time while the backend uses UTC day boundaries, so it can be off by one day near midnight IST"]},
+      {"screen": "Overview > Action Items (admin)", "issues": ["The 'Today's summary' (EOD) and 'Business Campaign · Today' cards stay fixed to today and ignore the page-level period. This could confuse users. Consider labelling them or making them follow the selected range."]},
+      {"screen": "Campaign Dialer form", "issues": ["After creating a campaign, the Skip-today and Autostart toggles keep the last values the user set instead of going back to the defaults (on)"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v11_dashboard_range_campaigns.py", "/app/test_reports/pytest/pytest_results_v11.xml"],
+  "action_items": [
+    "Optional: compute the call-report 'followups' value from the follow_ups collection so seeded or older follow-ups are counted",
+    "Optional: exclude mocked pending_credentials call attempts from outgoing-call KPIs and from the skip_called_today check",
+    "Optional: switch the dashboard custom date inputs to the shadcn Calendar"
+  ],
+  "critical_code_review_comments": [
+    "dashboard.py _parse_range: date_from with no date_to falls back to the default end. If date_from is after the default end, this returns 400, which is acceptable",
+    "callerdesk.stage_leads loads up to 5000 leads plus a distinct query, which is fine for now. create_campaign rebuilds set(ids) inside the list comprehension; hoist it out",
+    "TeamCallReport swallows API errors silently (catch(() => {})), so there is no error state shown to the user"
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v11_dashboard_range_campaigns.py"],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "Created campaigns TEST_draft, TEST_auto (x2) and TEST_UI_campaign. All are cancelled, and no active or draft campaigns remain. Template TEST_tpl_greet was created and then deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Server date is Oct 23 2026. Presets were verified: today=23 Oct, week=19–23 Oct, last_month=01–30 Sep, 30d=24 Sep–23 Oct. The call report shows for admin and manager and is hidden for executive (priya); the user select changes counts (all 142 -> Priya 48). Stage preview arithmetic: count+skipped with skip on equals count with skip off. The auto-start campaign run returned started=2 with numbers marked pending_credentials. WA template picker substitutes both {name} and {{name}}. Sending fails with an 'Evolution API not connected' toast, which is expected. Settings has no 'Calling & recording'. The browser title is 'Propzel · Real Estate CRM'."
+}
