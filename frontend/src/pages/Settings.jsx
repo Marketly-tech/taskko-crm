@@ -4,6 +4,7 @@ import { SETTINGS } from "@/constants/testIds";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { CalendarInviteSettings } from "@/components/CalendarInviteSettings";
 import { MessageSquare, Mail, Calendar as CalIcon, Zap, Globe, PhoneCall, CheckCircle2 } from "lucide-react";
 
 export default function Settings() {
@@ -18,6 +19,7 @@ export default function Settings() {
   };
   useEffect(() => { load(); }, []);
 
+  const [savedKey, setSavedKey] = useState(0);
   const save = async () => {
     setBusy(true);
     try {
@@ -25,6 +27,7 @@ export default function Settings() {
       delete payload.id;
       await api.patch("/settings", payload);
       toast.success("Settings saved");
+      setSavedKey((k) => k + 1);
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setBusy(false); }
   };
@@ -99,12 +102,13 @@ export default function Settings() {
 
         <Row
           icon={CalIcon}
-          title="Google Calendar reminders"
-          hint="Push site-visit events to your team's calendars with automatic reminders."
+          title="Google Calendar invites for site visits"
+          hint="Email a calendar invite for every site visit to the executive, co-owner and customer, from your organisation's email."
           testId={SETTINGS.toggleCalendar}
           checked={!!s.google_calendar_enabled}
           onChange={(v) => set("google_calendar_enabled", v)}
         />
+        {s.google_calendar_enabled && <CalendarInviteSettings s={s} set={set} savedKey={savedKey} />}
       </section>
 
       <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">

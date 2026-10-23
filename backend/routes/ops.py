@@ -1,4 +1,5 @@
 from core import *  # noqa: F401,F403
+from routes.calendar_invites import queue_invite
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +44,7 @@ async def create_visit(body: SiteVisitBody, actor: dict = Depends(get_current_us
             link=f"/leads/{doc['lead_id']}",
             meta={"visit_id": doc["id"]},
         )
+    queue_invite(doc["id"], "REQUEST")
     return doc
 
 
@@ -53,10 +55,16 @@ async def update_visit(visit_id: str, body: UpdateSiteVisitBody, actor: dict = D
         update["scheduled_at"] = update["scheduled_at"].astimezone(timezone.utc).isoformat()
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
-    r = await db.site_visits.update_one({"id": visit_id}, {"$set": update})
-    if r.matched_count == 0:
+    prev = await db.site_visits.find_one({"id": visit_id}, {"_id": 0})
+    if not prev:
         raise HTTPException(status_code=404, detail="Site visit not found")
+    await db.site_visits.update_one({"id": visit_id}, {"$set": update})
     v = await db.site_visits.find_one({"id": visit_id}, {"_id": 0})
+    if update.get("status") == "cancelled" and prev.get("status") != "cancelled":
+        queue_invite(visit_id, "CANCEL")
+    elif "scheduled_at" in update and update["scheduled_at"] != prev.get("scheduled_at") and v.get("status") == "scheduled":
+        await db.site_visits.update_one({"id": visit_id}, {"$set": {"reminders_sent": []}})
+        queue_invite(visit_id, "REQUEST")
     if "status" in update:
         await log_activity(v["lead_id"], actor, "site_visit_" + update["status"], f"Site visit {update['status']}")
     return v
@@ -64,6 +72,10 @@ async def update_visit(visit_id: str, body: UpdateSiteVisitBody, actor: dict = D
 
 @router.delete("/site-visits/{visit_id}")
 async def delete_visit(visit_id: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    v = await db.site_visits.find_one({"id": visit_id}, {"_id": 0, "status": 1})
+    if v and v.get("status") == "scheduled":
+        from routes.calendar_invites import send_visit_invite
+        await send_visit_invite(visit_id, "CANCEL")
     await db.site_visits.delete_one({"id": visit_id})
     return {"ok": True}
 

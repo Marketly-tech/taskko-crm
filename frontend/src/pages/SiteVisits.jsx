@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { api, relTime } from "@/lib/api";
+import { api, relTime, formatApiError } from "@/lib/api";
 import { useProjects } from "@/contexts/ProjectContext";
 import { Link } from "react-router-dom";
 import { VISIT } from "@/constants/testIds";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarClock, CalendarDays, List, MapPin, User2 } from "lucide-react";
+import { CalendarClock, CalendarDays, List, MapPin, User2, CalendarCheck, CalendarX } from "lucide-react";
 import { VisitCalendar } from "@/components/VisitCalendar";
 import { toast } from "sonner";
 
@@ -43,6 +43,11 @@ export default function SiteVisits() {
     (acc[d] = acc[d] || []).push(v);
     return acc;
   }, {});
+
+  const resendInvite = async (id) => {
+    try { const { data } = await api.post(`/site-visits/${id}/resend-invite`); toast.success(`Invite sent to ${data.to.join(", ")}`); load(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   const updateStatus = async (id, s) => {
     await api.patch(`/site-visits/${id}`, { status: s });
@@ -106,6 +111,11 @@ export default function SiteVisits() {
                       <div className="text-xs text-forest/60 mt-0.5 flex items-center gap-4">
                         {project && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /> {project.name}</span>}
                         {owner && <span className="inline-flex items-center gap-1"><User2 className="h-3 w-3" /> {owner.name}</span>}
+                        {v.invite_status && (
+                          <span data-testid={`visit-invite-${v.id}`} title={v.invite_error || (v.invite_sent_to || []).join(", ")} className={`inline-flex items-center gap-1 ${v.invite_status === "failed" ? "text-clay" : "text-[#2D6A4F]"}`}>
+                            {v.invite_status === "failed" ? <CalendarX className="h-3 w-3" /> : <CalendarCheck className="h-3 w-3" />} Invite {v.invite_status}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span className={`text-[10px] uppercase tracking-[0.18em] font-bold rounded-sm px-2 py-1 border ${STATUS_TONE[v.status] || ""}`}>
@@ -113,6 +123,7 @@ export default function SiteVisits() {
                     </span>
                     {v.status === "scheduled" && (
                       <div className="flex items-center gap-1">
+                        <button data-testid={`visit-resend-invite-${v.id}`} onClick={() => resendInvite(v.id)} title="Email the calendar invite again" className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150 inline-flex items-center gap-1"><CalendarCheck className="h-3.5 w-3.5" /> Invite</button>
                         <button onClick={() => updateStatus(v.id, "completed")} className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150">Mark done</button>
                         <button onClick={() => updateStatus(v.id, "no_show")} className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150">No show</button>
                       </div>
