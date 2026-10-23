@@ -117,6 +117,9 @@ async def initiate_call(lead_id: str, actor: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Lead not found")
     if not can_access_lead(lead, actor):
         raise HTTPException(status_code=403, detail="You can only call your own leads")
+    from routes.callerdesk import cd_settings, initiate_callerdesk_call
+    if (await cd_settings())["calling_provider"] == "callerdesk":
+        return await initiate_callerdesk_call(lead, actor)
     return await _initiate_twilio_call(lead, actor)
 
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { CallReportCard } from "@/components/CallReportCard";
 import { api, STAGE_META, SOURCE_LABEL, inr, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { DASH } from "@/constants/testIds";
@@ -288,6 +289,7 @@ function ActionItemsTab() {
   return (
     <div className="space-y-6">
       {user?.role === "admin" && <AdminEODSummary mode="card" />}
+      {(user?.role === "admin" || user?.role === "manager") && <CallReportCard />}
       <div className="flex items-baseline gap-3">
         <div className="label-caps">Overview</div>
         <div className="text-sm text-forest/60">· {today} · 12:00 AM – 11:59 PM</div>

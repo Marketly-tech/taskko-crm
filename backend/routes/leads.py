@@ -1,3 +1,5 @@
+import re
+
 from core import *  # noqa: F401,F403
 
 router = APIRouter(prefix="/api")
@@ -8,6 +10,21 @@ from routes.twilio_voice import _initiate_twilio_call
 # LEADS
 # ---------------------------------------------------------------------------
 
+
+
+async def _require_lead(lead_id: str, user: dict) -> dict:
+    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if not can_access_lead(lead, user):
+        raise HTTPException(status_code=403, detail="Not your lead")
+    return lead
+
+
+async def _validate_members(ids: list) -> None:
+    ids = [i for i in ids if i]
+    if ids and await db.users.count_documents({"id": {"$in": ids}}) != len(set(ids)):
+        raise HTTPException(status_code=400, detail="Assignee is not a member of this organisation")
 
 
 async def _notify_co_owners(lead: dict, user_ids: list) -> None:
@@ -32,6 +49,7 @@ async def list_leads(
     search: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
+    search = re.escape(search) if search else search
     q: dict = {}
     ands: list = []
     if project_id:
@@ -74,6 +92,7 @@ async def get_lead(lead_id: str, user: dict = Depends(get_current_user)):
 @router.post("/leads")
 async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
     doc = body.model_dump()
+    await _validate_members([doc.get("assigned_to"), *(doc.get("co_assigned_to") or [])])
     doc["id"] = new_id()
     doc["created_at"] = now_utc().isoformat()
     doc["updated_at"] = doc["created_at"]
@@ -124,6 +143,7 @@ async def update_lead(lead_id: str, body: UpdateLeadBody, actor: dict = Depends(
             update.pop(f)
     if actor["role"] == "executive":
         update.pop("co_assigned_to", None)
+    await _validate_members([update.get("assigned_to"), *(update.get("co_assigned_to") or [])])
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
     update["updated_at"] = now_utc().isoformat()
@@ -143,6 +163,7 @@ async def update_lead(lead_id: str, body: UpdateLeadBody, actor: dict = Depends(
 
 @router.post("/leads/{lead_id}/assign")
 async def assign_lead(lead_id: str, body: AssignBody, actor: dict = Depends(require_roles("admin", "manager"))):
+    await _validate_members([body.user_id])
     r = await db.leads.update_one(
         {"id": lead_id},
         {"$set": {"assigned_to": body.user_id, "updated_at": now_utc().isoformat()}},
@@ -181,6 +202,7 @@ async def move_stage(lead_id: str, body: StageBody, actor: dict = Depends(get_cu
 
 @router.post("/leads/{lead_id}/notes")
 async def add_note(lead_id: str, body: NoteBody, actor: dict = Depends(get_current_user)):
+    await _require_lead(lead_id, actor)
     await log_activity(lead_id, actor, body.kind, body.text)
     return {"ok": True}
 
@@ -260,7 +282,7 @@ async def webhook_leads(source: str, payload: dict, org: Optional[str] = None):
     allowed = {"magicbricks", "99acres", "commonfloor", "housing", "website", "google_ads", "facebook", "instagram", "referral", "walk_in"}
     if source not in allowed:
         raise HTTPException(status_code=400, detail=f"Unknown source '{source}'")
-    org_doc = await raw_db.organizations.find_one({"$or": [{"slug": org}, {"id": org}]} if org else {}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
+    org_doc = await raw_db.organizations.find_one({"$or": [{"slug": org}, {"id": org}], "active": {"$ne": False}} if org else {"active": {"$ne": False}}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
     if not org_doc:
         raise HTTPException(status_code=404, detail="Organisation not found")
     org_ctx.set(org_doc["id"])
@@ -293,9 +315,7 @@ class EmailLogBody(BaseDoc):
 
 @router.post("/leads/{lead_id}/log-call")
 async def log_call(lead_id: str, body: CallLogBody, actor: dict = Depends(get_current_user)):
-    lead = await db.leads.find_one({"id": lead_id})
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+    await _require_lead(lead_id, actor)
     meta = body.model_dump()
     kind = "outgoing_call" if body.direction == "outgoing" else "incoming_call"
     if body.disposition in ("missed", "busy", "no_answer"):
@@ -307,18 +327,14 @@ async def log_call(lead_id: str, body: CallLogBody, actor: dict = Depends(get_cu
 
 @router.post("/leads/{lead_id}/log-sms")
 async def log_sms(lead_id: str, body: SmsLogBody, actor: dict = Depends(get_current_user)):
-    lead = await db.leads.find_one({"id": lead_id})
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+    await _require_lead(lead_id, actor)
     await log_activity(lead_id, actor, "sms_sent", body.text[:200], body.model_dump())
     return {"ok": True}
 
 
 @router.post("/leads/{lead_id}/log-email")
 async def log_email(lead_id: str, body: EmailLogBody, actor: dict = Depends(get_current_user)):
-    lead = await db.leads.find_one({"id": lead_id})
-    if not lead:
-        raise HTTPException(status_code=404, detail="Lead not found")
+    await _require_lead(lead_id, actor)
     await log_activity(lead_id, actor, "email_sent", body.subject, body.model_dump())
     return {"ok": True}
 

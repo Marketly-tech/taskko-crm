@@ -173,41 +173,6 @@ async def dashboard_action_items(user: dict = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # REPORTS (aggregations)
 # ---------------------------------------------------------------------------
-@router.get("/reports/executives")
-async def report_executives(user: dict = Depends(get_current_user)):
-    execs = await db.users.find({"role": "executive"}, {"_id": 0, "password_hash": 0}).to_list(100)
-    rows = []
-    for e in execs:
-        total = await db.leads.count_documents({"assigned_to": e["id"]})
-        booked = await db.leads.count_documents({"assigned_to": e["id"], "stage": "booked"})
-        site_visits = await db.site_visits.count_documents({"assigned_to": e["id"]})
-        pending = await db.follow_ups.count_documents({"assigned_to": e["id"], "status": "pending"})
-        conv = round((booked / total * 100), 1) if total else 0
-        rows.append({
-            "id": e["id"], "name": e["name"], "email": e["email"],
-            "leads": total, "booked": booked, "site_visits": site_visits,
-            "pending_followups": pending, "conversion": conv,
-        })
-    rows.sort(key=lambda r: -r["conversion"])
-    return rows
-
-
-@router.get("/reports/sources")
-async def report_sources(user: dict = Depends(get_current_user)):
-    pipe = [{"$group": {"_id": {"source": "$source", "stage": "$stage"}, "count": {"$sum": 1}}}]
-    rows = {}
-    async for r in db.leads.aggregate(pipe):
-        src = r["_id"]["source"]
-        stg = r["_id"]["stage"]
-        rows.setdefault(src, {"source": src, "total": 0, "booked": 0})
-        rows[src]["total"] += r["count"]
-        if stg == "booked":
-            rows[src]["booked"] += r["count"]
-    out = list(rows.values())
-    for o in out:
-        o["conversion"] = round((o["booked"] / o["total"] * 100), 1) if o["total"] else 0
-    out.sort(key=lambda r: -r["total"])
-    return out
 
 
 

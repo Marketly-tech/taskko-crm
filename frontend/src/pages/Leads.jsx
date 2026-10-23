@@ -471,7 +471,7 @@ export default function Leads() {
           </SelectContent>
         </Select>
         <Select value={ownerMode} onValueChange={setOwnerMode} disabled={!execFilter}>
-          <SelectTrigger data-testid="leads-filter-owner-mode" className="w-[160px] h-8 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Ownership" /></SelectTrigger>
+          <SelectTrigger data-testid="leads-filter-owner-mode" className="w-[180px] h-8 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Ownership" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="any">Owner or co-owner</SelectItem>
             <SelectItem value="primary">Primary owner</SelectItem>

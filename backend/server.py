@@ -1,12 +1,12 @@
 """Tasko CRM - FastAPI app entrypoint."""
 from core import *  # noqa: F401,F403
-from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations
+from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk
 from routes.organizations import ensure_organizations, for_each_org
 from routes.eod import send_eod_email_to_admins
 from routes.notifications import refresh_notifications
 
 app = FastAPI(title="Tasko CRM API")
-for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations):
+for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk):
     app.include_router(_m.router)
 
 
@@ -332,6 +332,7 @@ async def on_startup():
         _scheduler = AsyncIOScheduler(timezone=IST)
         _scheduler.add_job(for_each_org, args=[send_eod_email_to_admins], trigger=CronTrigger(hour=eod_hour, minute=eod_min), id="eod-email", replace_existing=True)
         _scheduler.add_job(for_each_org, args=[refresh_notifications], trigger="interval", minutes=15, id="notif-refresh", replace_existing=True, next_run_time=now_utc() + timedelta(seconds=30))
+        _scheduler.add_job(for_each_org, args=[callerdesk.campaign_tick], trigger="interval", minutes=1, id="cd-campaigns", replace_existing=True)
         _scheduler.start()
         log.info("Scheduler started (EOD %02d:%02d IST, notif-refresh every 15m)", eod_hour, eod_min)
     except Exception as e:

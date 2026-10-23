@@ -399,7 +399,8 @@ export default function LeadDetail() {
               onClick={async () => {
                 try {
                   const { data } = await api.post(`/leads/${leadId}/call`);
-                  if (data.mock) toast.info("Twilio not configured — mock call logged");
+                  if (data.status === "pending_credentials") toast.info("CallerDesk keys not added yet — call logged as pending");
+                  else if (data.mock) toast.info("Twilio not configured — mock call logged");
                   else toast.success(`Ringing your phone… (${data.status})`);
                   load();
                 } catch (e) {

@@ -41,7 +41,7 @@ async def refresh(request: Request, response: Response):
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     user = await raw_db.users.find_one({"id": payload["sub"]}, {"password_hash": 0})
-    if not user:
+    if not user or user.get("active") is False:
         raise HTTPException(status_code=401, detail="User not found")
     set_auth_cookies(response, user["id"], user["email"], user["role"])
     return clean(user)

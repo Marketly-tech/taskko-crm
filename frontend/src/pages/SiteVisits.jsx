@@ -4,7 +4,8 @@ import { useProjects } from "@/contexts/ProjectContext";
 import { Link } from "react-router-dom";
 import { VISIT } from "@/constants/testIds";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarClock, MapPin, User2 } from "lucide-react";
+import { CalendarClock, CalendarDays, List, MapPin, User2 } from "lucide-react";
+import { VisitCalendar } from "@/components/VisitCalendar";
 import { toast } from "sonner";
 
 const STATUS_TONE = {
@@ -20,6 +21,7 @@ export default function SiteVisits() {
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
   const [status, setStatus] = useState("");
+  const [view, setView] = useState("calendar");
 
   const load = async () => {
     const params = {};
@@ -57,6 +59,11 @@ export default function SiteVisits() {
             {filtered.length} scheduled
           </h2>
         </div>
+        <div className="flex items-center gap-2">
+        <div className="inline-flex border border-[#E6E4DD] rounded-sm overflow-hidden">
+          <button data-testid="visits-view-calendar" onClick={() => setView("calendar")} title="Calendar view" className={`h-9 w-9 grid place-items-center transition-colors duration-150 ${view === "calendar" ? "bg-forest text-white" : "bg-white text-forest"}`}><CalendarDays className="h-4 w-4" /></button>
+          <button data-testid="visits-view-agenda" onClick={() => setView("agenda")} title="Agenda view" className={`h-9 w-9 grid place-items-center transition-colors duration-150 ${view === "agenda" ? "bg-forest text-white" : "bg-white text-forest"}`}><List className="h-4 w-4" /></button>
+        </div>
         <Select value={status || "__all__"} onValueChange={(v) => setStatus(v === "__all__" ? "" : v)}>
           <SelectTrigger className="w-[160px] h-9 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Status" /></SelectTrigger>
           <SelectContent>
@@ -67,9 +74,11 @@ export default function SiteVisits() {
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
+        </div>
       </div>
 
-      <div className="space-y-6">
+      {view === "calendar" && <VisitCalendar visits={filtered} leads={leads} projects={projects} />}
+      {view === "agenda" && <div className="space-y-6">
         {Object.entries(grouped).sort((a, b) => new Date(a[0]) - new Date(b[0])).map(([day, arr]) => (
           <div key={day} className="border border-[#E6E4DD] bg-white rounded-sm">
             <div className="px-5 py-3 border-b border-[#E6E4DD] flex items-center justify-between bg-bone-alt/40">
@@ -120,7 +129,7 @@ export default function SiteVisits() {
             No visits scheduled.
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

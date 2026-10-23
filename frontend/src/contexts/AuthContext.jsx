@@ -29,7 +29,8 @@ export function AuthProvider({ children }) {
     setError("");
     try {
       localStorage.removeItem(ORG_KEY);
-      const { data } = await api.post("/auth/login", { email, password });
+      await api.post("/auth/login", { email, password });
+      const { data } = await api.get("/auth/me");
       setUser(normalize(data));
       return true;
     } catch (e) {

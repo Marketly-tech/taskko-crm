@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 8 - Phase 1 backend split regression + Phase 2 (multi-org, super admin, masking, co-owner, DNP stages). Backend: 47/48 pytest pass (/app/backend/tests/backend_test_v8_multiorg.py) - all GET endpoints for admin/manager/exec return 200, auth me/refresh/logout, lead CRUD/assign/stage(all 4 DNP)/notes/log-call/bulk-assign/import, webhooks with ?org=skyline / default / unknown org 404, multi-org isolation (skyline cannot GET/PATCH/DELETE tasko lead -> 404), super admin org listing, X-Organization-Id scoping (bad id -> 403), overview/audit-logs, create org + admin login (empty workspace), disable org -> 403 for its users -> re-enable, non-super-admin 403, masking for manager/exec on leads/detail/dashboard/action-items/users/activities, exec PATCH with masked phone preserves real phone, co-owner add/visibility/owner_mode filters/notification/exec can't change co-owners. Only failure: cross-org assignment (Skyline admin can assign a lead to a Tasko user id). Frontend Playwright: all flows pass - super admin sidebar nav-super-admin, org switcher, /super-admin page totals+rows, create org dialog, enable switch toggle, Open skyline -> Leads empty, switch back to Tasko; admin kanban 11 columns incl DNP, owner-mode filter disabled until exec chosen and filters any/primary/co_owner correctly, co-owner picker add -> chip + tags on kanban/list; manager & executive lead detail phone masked with 'masked' label and no wa.me link; executive has no co-owner controls; co-owner notification in bell; 3-dot move + drag between DNP columns; sign out.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/leads/{id}/assign", "issue": "Assignee user_id is not checked against the active org. Skyline admin assigned a Skyline lead to Priya (Tasko) and got 200; a notification was also created inside the Skyline org for a Tasko user. bulk-assign checks this correctly through scoped db.users. PATCH /leads {assigned_to, co_assigned_to} and POST /leads {assigned_to, co_assigned_to} have the same gap."},
+      {"endpoint": "POST /api/auth/login", "issue": "Login response doesn't include active_organization_id (only /auth/me sets it). Right after a super admin logs in, the OrgSwitcher shows the 'Select organisation' placeholder until the page reloads."},
+      {"endpoint": "POST /api/auth/refresh", "issue": "Refresh doesn't check whether the user or the organisation is disabled. Authed calls still return 403, so the impact is low."},
+      {"endpoint": "POST /api/webhooks/leads/{source}?org=", "issue": "A disabled org still accepts webhook leads (no active check)."},
+      {"endpoint": "POST /api/leads/{id}/notes, /log-call, /log-sms, /log-email", "issue": "No can_access_lead check (log-* only checks that the lead exists; notes doesn't even do that), so an executive can log activity on any lead in the org by id."},
+      {"endpoint": "GET /api/leads?search=", "issue": "Phone regex search works on the real phone even for masked roles. An executive could work out the hidden digits of their own leads by searching. The search text also isn't regex-escaped."},
+      {"endpoint": "Auth playbook", "issue": "No brute-force lockout after 5 failed logins (existed before this change)."},
+      {"endpoint": "DELETE /api/leads/{id}", "issue": "Notifications for the deleted lead aren't removed (stale 'Added as co-owner' items stay in the bell)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "OrgSwitcher", "issue": "Shows the 'Select organisation' placeholder right after login (before any reload) because user.active_organization_id comes from the login response, which doesn't have it.", "selector": "[data-testid=org-switcher-trigger]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Leads filter bar", "issues": ["The ownership select trigger (160px) cuts off 'Owner or co-owner' to 'Owner or co-owne'"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v8_multiorg.py", "/app/test_reports/pytest/pytest_results_v8.xml"],
+  "action_items": [
+    "Validate assigned_to / user_id / co_assigned_to against the active org's users (await db.users.find_one({'id': uid}) -> 400/404) in POST /leads, PATCH /leads, POST /leads/{id}/assign",
+    "Return active_organization_id in the login response (or have AuthContext call /auth/me after login) so the org switcher shows the current org straight away",
+    "Optional: add can_access_lead to notes/log-* endpoints; check org active in webhook + refresh; widen the owner-mode select; re.escape the search text"
+  ],
+  "critical_code_review_comments": [
+    "core.py: ScopedCollection auto-scoping is solid, but raw_db is used in login/refresh/organizations as intended. Watch for any new endpoint that uses raw_db by mistake.",
+    "Public Twilio callbacks set org_ctx from the activity doc - fine. Scheduler jobs are wrapped with for_each_org - fine.",
+    "OrgSwitcher stores the org id in localStorage and never clears it on logout. It's harmless for non-super-admins because the header is ignored, but if that org is later deleted, a super admin gets 403 on every call."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v8_multiorg.py"],
+  "success_rate": {"backend": "98% (47/48)", "frontend": "100%"},
+  "seed_data_creation": "Created test orgs 'TEST test-org-c407d5' (admin test-org-c407d5@example.com/pass1234) and 'UI Test uitest-8015' (uitest-8015@example.com/pass1234); there is no org delete endpoint, so they were left active. Skyline was re-enabled (active=true). The test lead was deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest /app/backend/tests/backend_test_v8_multiorg.py (pytest.ini uses xdist; use -n 0 for serial). test_cross_org_assign is expected to fail until assignee org validation is added. Testids: kanban-col-<stage>, kanban-card-<id>, leads-row-<id>, topbar-notif-bell, auth-logout-btn."
+}

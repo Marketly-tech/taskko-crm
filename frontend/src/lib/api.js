@@ -27,6 +27,10 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url = original.url || "";
     const skip = url.includes("/auth/login") || url.includes("/auth/refresh") || url.includes("/auth/logout");
+    if (status === 403 && error.response?.data?.detail === "Organisation access denied" && localStorage.getItem(ORG_KEY)) {
+      localStorage.removeItem(ORG_KEY);
+      window.location.reload();
+    }
     if (status !== 401 || original._retried || skip) return Promise.reject(error);
     original._retried = true;
     try {
