@@ -75,7 +75,7 @@ function LogCallDialog({ leadId, onSaved }) {
           <div>
             <div className="label-caps mb-1.5">Recording URL (mp3/wav)</div>
             <input value={form.recording_url} onChange={(e) => setForm({ ...form, recording_url: e.target.value })} placeholder="https://cdn.exotel.in/…mp3" className="w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
-            <div className="text-[11px] text-forest/50 mt-1">Auto-populated by Exotel / MyOperator / Twilio webhooks in production.</div>
+            <div className="text-[11px] text-forest/50 mt-1">Auto-populated by CallerDesk call webhooks.</div>
           </div>
           <div>
             <div className="label-caps mb-1.5">Notes</div>
@@ -395,32 +395,19 @@ export default function LeadDetail() {
             </div>
           </div>
 
-          {/* Twilio Call button (live) + manual log actions */}
+          {/* CallerDesk click-to-call + manual log actions */}
           <div className="grid grid-cols-4 gap-3">
             <button
-              data-testid="lead-twilio-call-btn"
+              data-testid="lead-call-btn"
               onClick={async () => {
                 try {
                   const { data } = await api.post(`/leads/${leadId}/call`);
                   if (data.status === "pending_credentials") toast.info("Business Campaign calling keys not added yet — call logged as pending");
-                  else if (data.mock) toast.info("Twilio not configured — mock call logged");
-                  else toast.success(`Ringing your phone… (${data.status})`);
+                  else toast.success("CallerDesk is ringing your phone…");
                   load();
                 } catch (e) {
                   const msg = formatApiError(e.response?.data?.detail) || e.message;
-                  const unverified = /unverified|21219|Verified Caller ID/i.test(msg);
-                  const missingPhone = /Set your phone/i.test(msg);
-                  if (unverified || missingPhone) {
-                    toast.error(msg, {
-                      duration: 12000,
-                      action: {
-                        label: "Update phone",
-                        onClick: () => nav("/team"),
-                      },
-                    });
-                  } else {
-                    toast.error(msg);
-                  }
+                  toast.error(msg, { duration: /Set your phone/i.test(msg) ? 12000 : 5000, description: /Set your phone/i.test(msg) ? "Open My profile at the bottom of the sidebar to add it." : undefined });
                 }
               }}
               className="h-10 rounded-sm bg-forest text-white text-sm font-medium hover:bg-forest-soft transition-colors duration-150 inline-flex items-center justify-center gap-2 col-span-1"

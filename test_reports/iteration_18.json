@@ -1,0 +1,33 @@
+{
+  "summary": "Tested the move of CallerDesk keys to server env vars and the removal of the provider switch. Backend: 12/12 pytest pass. GET /api/callerdesk/status returns configured:false, secret_configured:false, virtual_number, and webhook_url .../api/callerdesk/webhook?org=tasko for admin. It has no provider or org_override fields. For managers webhook_url is null. PATCH /api/callerdesk/settings returns 404. None of the 3 Mongo settings docs contain calling_provider or callerdesk_* fields. POST /api/leads/{id}/call returns provider=callerdesk, status=pending_credentials, mock=true, and the pending call appears in call-logs. It returns 400 'Lead has no phone number' for a lead without a phone, 400 'Set your phone number in My profile first' when the caller (priya) has no phone, and 404 for an unknown lead. A campaign with stages, lead_ids and auto_start started 1 call, logged as pending_credentials, and the DELETE cancelled it. A bad stage returns 400. The webhook (?org=tasko) accepts a payload with no secret (200). An unknown org returns 404. Frontend: /callerdesk/settings shows 'Keys pending', the webhook URL and the secret warning. The panel has 0 cd-set-* inputs, no cd-settings-save and no provider toggle. The Dashboard, Dialer, Campaign Dialer, Call Logs and Settings tabs all load. The lead detail Call button shows the toast 'Business Campaign calling keys not added yet — call logged as pending'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/leads (auto_call_on_new_lead)", "issue": "routes/leads.py:149 still calls _initiate_twilio_call for auto-call on new lead assignment. This conflicts with 'always use CallerDesk'. Switch it to routes.callerdesk.initiate_callerdesk_call."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "LeadDetail Call button", "issues": ["The testid is still 'lead-twilio-call-btn' and the comment still says 'Twilio Call button'. The 'Twilio not configured — mock call logged' fallback and the Twilio 21219 hints are now dead copy. The 'Update phone' toast action goes to /team, but the backend message says 'My profile'."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v19_callerdesk_env_keys.py", "/app/test_reports/pytest/pytest_v19.xml"],
+  "action_items": [
+    "Route auto_call_on_new_lead in routes/leads.py through initiate_callerdesk_call instead of _initiate_twilio_call (optional but consistent with the user's choice)",
+    "Optional cleanup: remove the Twilio-specific copy and branches from the LeadDetail call handler; point the missing-phone action at the profile page"
+  ],
+  "critical_code_review_comments": [
+    "routes/leads.py auto-call still uses Twilio (see minor issue).",
+    "twilio_voice.py keeps the Twilio client init, twiml and status callbacks even though no outbound Twilio path is used by the Call button. Dead code, but harmless.",
+    "The webhook has no auth when CALLERDESK_WEBHOOK_SECRET is unset (by design, and the UI warns about it). Set the secret before go-live."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v19_callerdesk_env_keys.py (new)"],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100%"},
+  "seed_data_creation": "Created TEST_CD leads, a TEST_CD campaign and a TEST_sid webhook call; all were cleaned up afterwards. The UI Call-button test logged one pending_credentials call on the existing lead 'Race'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "CallerDesk keys come only from env (CALLERDESK_AUTHCODE/VIRTUAL_NUMBER/WEBHOOK_SECRET) and are currently unset, so all calls return pending_credentials. Run pytest with -n 0 (pytest.ini adds xdist args). An end-of-day report dialog may pop up on page load; press Escape before clicking. Creating a lead requires project_id. priya@tasko.com has no phone, so use her for caller-without-phone tests.",
+  "test_credentials": "admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123 from /app/memory/test_credentials.md"
+}

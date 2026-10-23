@@ -4,7 +4,6 @@ from core import *  # noqa: F401,F403
 
 router = APIRouter(prefix="/api")
 from core import _pick_auto_assignee
-from routes.twilio_voice import _initiate_twilio_call
 
 # ---------------------------------------------------------------------------
 # LEADS
@@ -140,13 +139,14 @@ async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
             link=f"/leads/{doc['id']}",
             meta={"lead_id": doc["id"]},
         )
-    # Auto-call on new lead assignment (Twilio)
+    # Auto-call on new lead assignment (CallerDesk)
     settings = await db.settings.find_one({"id": "singleton"}) or {}
     if settings.get("auto_call_on_new_lead") and doc.get("assigned_to") and doc.get("phone"):
         assignee = await db.users.find_one({"id": doc["assigned_to"]})
         if assignee and assignee.get("phone"):
             try:
-                await _initiate_twilio_call(doc, assignee)
+                from routes.callerdesk import initiate_callerdesk_call
+                await initiate_callerdesk_call(doc, assignee)
             except HTTPException as e:
                 log.warning("auto-call skipped: %s", e.detail)
             except Exception as e:

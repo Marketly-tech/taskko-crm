@@ -33,6 +33,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 
 - Iteration 15-16 (Jun 2026): Evolution API is env-only (EVOLUTION_API_URL/KEY/INSTANCE_NAME); DB credential fields + PATCH /api/whatsapp/settings removed. Connection-state pre-check + clear 409 messages (root cause of HTTP 500 = instance "Connection Closed", phone not linked). WA Settings panel = status, QR, webhook URL only. Twilio section removed from Settings (missed-call follow-up kept). Fixed WA campaign NameError + final counters.
 
+- Iteration 18 (Jun 2026): CallerDesk keys env-only (CALLERDESK_AUTHCODE / VIRTUAL_NUMBER / WEBHOOK_SECRET); settings form + PATCH /api/callerdesk/settings + provider switch removed; lead Call button and auto-call always use CallerDesk. Webhook URL shows real org slug.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).
