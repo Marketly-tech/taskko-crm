@@ -395,4 +395,5 @@ async def _deliver_campaign(cid: str, body: MessageCampaignBody, leads: list, ac
             if len(errors) < 20:
                 errors.append({"lead": lead.get("name"), "reason": getattr(e, "detail", None) or str(e)[:200]})
         await db.message_campaigns.update_one({"id": cid}, {"$set": {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}})
-    await db.message_campaigns.update_one({"id": cid}, {"$set": {"status": "completed", "completed_at": now_utc().isoformat()}})
+    await db.message_campaigns.update_one({"id": cid}, {"$set": {"status": "completed", "completed_at": now_utc().isoformat(),
+                                                                  "sent": sent, "failed": failed, "skipped": skipped, "errors": errors}})

@@ -31,6 +31,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 
 - Iteration 14 (Jun 2026): Follow-ups filters (date quick picks Overdue/Today/Tomorrow/This week + custom, stage, status retained, top project picker). Project compulsory on manual create/edit (`_require_project`); live/imported leads without project sit in "Unassigned project" bucket (`project_id=none` filter, picker option). Leads page uses the global top-right picker; banner to move all unassigned leads to one project (`/api/leads/unassigned-project[/move]`). Deleting a project moves its leads to Unassigned; deleting a lead removes its follow-ups/visits.
 
+- Iteration 15-16 (Jun 2026): Evolution API is env-only (EVOLUTION_API_URL/KEY/INSTANCE_NAME); DB credential fields + PATCH /api/whatsapp/settings removed. Connection-state pre-check + clear 409 messages (root cause of HTTP 500 = instance "Connection Closed", phone not linked). WA Settings panel = status, QR, webhook URL only. Twilio section removed from Settings (missed-call follow-up kept). Fixed WA campaign NameError + final counters.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).

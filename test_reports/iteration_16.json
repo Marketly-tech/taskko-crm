@@ -1,0 +1,27 @@
+{
+  "summary": "Retest of the iteration_15 fixes. All fixes verified. (1) WhatsApp campaign: the NameError 'cfg' is gone. A campaign run against the unlinked instance completes with failed=1, and the reason is the clear STATE_HELP text ('WhatsApp is waiting for the QR scan...' because the state is 'connecting' after the QR call). (2) _evo_error and _state no longer crash on list/str/null/non-JSON/non-dict bodies: the v15 test test_list_json_error_body_does_not_crash passes, plus 13 new parametrized unit tests. (3) No regressions in the v15 and v16 WhatsApp suites (status, 409 sends, qrcode, sync, settings 404): 32/32 pass after updating the v16 DISC prefix to accept the reworded 'connecting' help text. (4) Frontend: the Settings Channels subtitle now reads 'WhatsApp connects through the server — link the phone in WhatsApp Inbox → Settings.' There is no 'mocked in v1' and no Twilio. The wa-not-configured banner source text mentions scanning the QR code. It is correctly hidden in the UI because configured=true. One new minor, pre-existing bug found in campaign counters.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/message-campaigns -> _deliver_campaign", "issue": "When a recipient is skipped (WhatsApp lead with no phone / email lead with no email), `continue` jumps past the per-iteration db.message_campaigns.update_one. The skipped count is lost when the skipped lead(s) are last in the list. Reproduced: an email campaign to lead 'Race' (email=None) ends status=completed, total=1, sent=0, failed=0, skipped=0. Fix: persist the counters in a `finally` block, or include sent/failed/skipped/errors in the final 'completed' $set."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v15_evolution_env.py", "/app/backend/tests/backend_test_v16_evolution_strict.py", "/app/backend/tests/backend_test_v17_campaign_evo_hardening.py", "/app/test_reports/pytest/pytest_v17.xml", "/app/test_reports/pytest/pytest_v17b.xml"],
+  "action_items": ["In _deliver_campaign, save sent/failed/skipped/errors in the final 'completed' update (or a finally block) so skipped recipients are counted"],
+  "critical_code_review_comments": [
+    "_deliver_campaign: the skipped counter is not persisted when `continue` is hit on the last lead(s)",
+    "WhatsApp campaign: each recipient still triggers its own connectionState pre-check plus a 1.5s sleep. Consider checking the state once up front and aborting the campaign with a clear message when it is not 'open'"
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v16_evolution_strict.py (DISC prefix accepts 'WhatsApp is waiting for the QR scan'; campaign test now asserts reason starts with STATE_HELP)", "/app/backend/tests/backend_test_v17_campaign_evo_hardening.py (new)"],
+  "success_rate": {"backend": "98% (45/46; the single failure is the skipped-counter bug)", "frontend": "100%"},
+  "seed_data_creation": "None persisted. The TEST_campaign_wa and TEST_campaign_email docs were deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Instance propzelrrl is unlinked. Its state is 'connecting' after any QR call, otherwise 'close'. Run the suites with `-n 0`. test_email_campaign_unaffected in v17 fails until the skipped-counter fix lands. Lead 7c3b30fa-ef78-4aca-a467-c436e6095250 has a phone but no email.",
+  "test_credentials": "From /app/memory/test_credentials.md (admin@tasko.com/admin123)"
+}

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv("/app/backend/.env")
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 API = f"{BASE_URL}/api"
-DISC = ("WhatsApp is disconnected on the server", "WhatsApp is still connecting")  # /instance/connect (QR) moves state close->connecting
+DISC = ("WhatsApp is disconnected on the server", "WhatsApp is still connecting", "WhatsApp is waiting for the QR scan")  # /instance/connect (QR) moves state close->connecting
 
 
 def _login(email, pw):
@@ -135,3 +135,4 @@ def test_whatsapp_campaign_error_reason(admin, lead_id):
     db.message_campaigns.delete_one({"id": cid})
     reasons = [e["reason"] for e in doc.get("errors", [])]
     assert all("not defined" not in str(x) for x in reasons), reasons
+    assert doc["failed"] >= 1 and reasons and all(str(x).startswith(DISC) for x in reasons), reasons
