@@ -46,8 +46,9 @@ def _configured(c: dict) -> bool:
 
 def _evo_error(r: httpx.Response) -> str:
     try:
-        resp = (r.json() or {}).get("response") or {}
-        msg = resp.get("message")
+        j = r.json()
+        resp = (j.get("response") if isinstance(j, dict) else None) or {}
+        msg = resp.get("message") if isinstance(resp, dict) else None
         msg = " ".join(str(x) for x in msg) if isinstance(msg, list) else msg
     except ValueError:
         msg = None
@@ -66,12 +67,17 @@ async def _state(c: dict) -> str:
         return "invalid_api_key"
     if r.status_code >= 400:
         return f"error_{r.status_code}"
-    return ((r.json() or {}).get("instance") or {}).get("state", "unknown")
+    try:
+        j = r.json()
+    except ValueError:
+        return "unknown"
+    inst = j.get("instance") if isinstance(j, dict) else None
+    return inst.get("state", "unknown") if isinstance(inst, dict) else "unknown"
 
 
 STATE_HELP = {
     "close": "WhatsApp is disconnected on the server. An admin must reconnect it by scanning the QR code (WhatsApp Inbox → Connection).",
-    "connecting": "WhatsApp is still connecting. Finish scanning the QR code, then try again.",
+    "connecting": "WhatsApp is waiting for the QR scan. Scan it with the phone (click 'Show QR' again if it expired), then try again.",
     "instance_not_found": "The WhatsApp instance set in EVOLUTION_INSTANCE_NAME does not exist on the Evolution server.",
     "invalid_api_key": "The Evolution API key (EVOLUTION_API_KEY) was rejected.",
     "unreachable": "The Evolution API server (EVOLUTION_API_URL) could not be reached.",
@@ -372,8 +378,6 @@ async def _deliver_campaign(cid: str, body: MessageCampaignBody, leads: list, ac
                 if not lead.get("phone"):
                     skipped += 1
                     continue
-                if not _configured(cfg):
-                    raise HTTPException(status_code=400, detail="WhatsApp not connected")
                 await _send(jid_of(lead["phone"]), WASendBody(text=text), actor)
             else:
                 if not lead.get("email"):

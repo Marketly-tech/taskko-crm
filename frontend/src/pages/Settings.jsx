@@ -65,7 +65,7 @@ export default function Settings() {
       <section className="border border-[#E6E4DD] bg-white rounded-sm p-6 space-y-5">
         <div>
           <div className="font-display font-bold text-xl text-forest tracking-tight">Channels</div>
-          <div className="text-xs text-forest/60 mt-1">Enable outbound channels. Credentials required for live send (mocked in v1).</div>
+          <div className="text-xs text-forest/60 mt-1">Enable outbound channels. WhatsApp connects through the server — link the phone in WhatsApp Inbox → Settings.</div>
         </div>
 
         <Row

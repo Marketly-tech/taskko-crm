@@ -92,7 +92,7 @@ export const WhatsAppChat = ({ fetchPath, sendPath, syncPath, leadName, height =
 
   return (
     <div data-testid={testId} className="flex flex-col border border-[#E6E4DD] rounded-sm overflow-hidden bg-[#F4F1EA]">
-      {!configured && <div data-testid="wa-not-configured" className="px-3 py-2 text-xs bg-clay/10 text-forest border-b border-clay/30">WhatsApp isn't connected yet — incoming messages appear here once an admin connects Evolution API in WhatsApp Inbox → Settings.</div>}
+      {!configured && <div data-testid="wa-not-configured" className="px-3 py-2 text-xs bg-clay/10 text-forest border-b border-clay/30">WhatsApp isn't connected yet — an admin needs to link the WhatsApp phone by scanning the QR code in WhatsApp Inbox → Settings.</div>}
       <div className={`overflow-y-auto p-3 space-y-2 ${height}`}>
         {msgs.length === 0 && <div className="text-center text-sm text-forest/50 pt-10">No WhatsApp messages yet.</div>}
         {msgs.map((m) => <Bubble key={m.id} m={m} />)}

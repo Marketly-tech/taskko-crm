@@ -1,0 +1,39 @@
+{
+  "summary": "Tested Evolution API env-only refactor + Twilio removal from Settings (backend + frontend). Backend: 30/32 tests pass (v15 suite 18/19 + new strict v16 suite 12/13). Credentials are env-only (PATCH/GET /api/whatsapp/settings -> 404, no evolution_* fields in Mongo settings docs, generic PATCH /api/settings ignores them). Status: configured=true, instance 'propzelrrl', help text present; non-admin instance/webhook_url null. Sends (lead + conversation, text + media) -> 409 with clear message, never 500. QR returns data:image/png;base64 (~1s); manager/exec 403. Sync endpoints -> 200 {synced:0}. NOTE: the state reads 'connecting', not 'close', once /instance/connect (the QR call) has run, so the 409 text becomes 'WhatsApp is still connecting. Finish scanning the QR code...'. This is expected Evolution behaviour (it drops back to close when the QR times out), and the tests accept both states. Frontend: WA Settings panel has no credential inputs and no Save button. It shows wa-state, wa-state-help, the QR button which renders a QR image, Check status and the webhook URL. Inbox and lead WhatsApp sends show a toast with the disconnected/connecting message. The /settings page has no Twilio, Mock mode or auto-call toggle. The missed-call follow-up toggle and hours select, calendar settings and lead-sources link are all present. Saving persists after reload, and no /api/twilio requests were made. Two bugs found: (1) WhatsApp campaigns always fail with NameError; (2) _evo_error crashes on a list JSON body.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/message-campaigns (channel=whatsapp) -> _deliver_campaign", "issue": "routes/whatsapp.py line ~375: `if not _configured(cfg)` references `cfg`, which is defined only in run_message_campaign and not in _deliver_campaign. Every WhatsApp recipient fails with reason \"name 'cfg' is not defined\" (reproduced: campaign doc errors=[{'reason': \"name 'cfg' is not defined\"}]). Fix: remove that check (already validated before the task is spawned) or call `cfg = await wa_cfg()` inside _deliver_campaign.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "evo() / _evo_error", "issue": "_evo_error does `(r.json() or {}).get(...)` and catches only ValueError. A list or other non-dict JSON error body raises AttributeError, which leaks as HTTP 500. Fix: check isinstance(dict) or catch (ValueError, AttributeError). Unit test test_list_json_error_body_does_not_crash fails."},
+      {"endpoint": "_state()", "issue": "A 200 response with a non-JSON or non-dict body would raise in r.json()/.get and cause a 500. Wrap it the same way as _evo_error."},
+      {"endpoint": "GET /api/whatsapp/qrcode", "issue": "Side effect: each call moves the instance from close to connecting, so status and send errors then show the 'connecting' help text instead of 'disconnected'. Acceptable, but the 'connecting' help could also tell admins to click 'Show QR' again if the QR expired."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Settings > Channels", "issues": ["The subtitle still says 'Credentials required for live send (mocked in v1)', which is outdated now that WhatsApp is live via server env."]},
+      {"screen": "WhatsAppChat banner (wa-not-configured)", "issues": ["The text says 'admin connects Evolution API in WhatsApp Inbox → Settings'. Credentials are now server env only, so it should say the server isn't configured, or point admins to scan the QR."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v15_evolution_env.py", "/app/backend/tests/backend_test_v16_evolution_strict.py", "/app/test_reports/pytest/pytest_v15.xml", "/app/test_reports/pytest/pytest_v16.xml"],
+  "action_items": [
+    "Fix NameError `cfg` in _deliver_campaign (routes/whatsapp.py) - WhatsApp campaigns currently always fail",
+    "Harden _evo_error and _state against non-dict JSON bodies (catch AttributeError / isinstance check)",
+    "Update the outdated copy in the Settings Channels subtitle and the WhatsAppChat not-configured banner"
+  ],
+  "critical_code_review_comments": [
+    "_deliver_campaign: undefined `cfg` (HIGH). The check is redundant anyway because run_message_campaign validates the config.",
+    "WhatsApp campaign: each recipient send triggers a separate connectionState pre-check (need_open). That is fine, but consider checking once per campaign and aborting early with a clear message when the instance is not open.",
+    "Settings.jsx: the missed-followup Row block is mis-indented (cosmetic)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v16_evolution_strict.py"],
+  "success_rate": {"backend": "94% (30/32)", "frontend": "100%"},
+  "seed_data_creation": "None persisted. TEST_campaign_wa message_campaign docs were deleted after the tests. Failed sends store nothing.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Evolution instance propzelrrl is not linked. Its state is 'close', or 'connecting' after any /api/whatsapp/qrcode call. Do not scan it. Sends are expected to return 409 with STATE_HELP text. Run the v16 suite with `-n 0` (pytest.ini adds xdist). Lead with phone: 7c3b30fa-ef78-4aca-a467-c436e6095250. After the fix, test_whatsapp_campaign_error_reason should pass (the reason should be the 409 STATE_HELP text). test_list_json_error_body_does_not_crash in v15 should pass after the _evo_error hardening.",
+  "test_credentials": "From /app/memory/test_credentials.md (admin@tasko.com/admin123, manager@tasko.com/manager123, priya@tasko.com/executive123)"
+}

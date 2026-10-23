@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="19" time="6.653" timestamp="2026-10-23T18:06:17.908888+00:00" hostname="agent-env-2f76e31e-442e-49ea-80bf-1fc160ea4439"><testcase classname="tests.backend_test_v15_evolution_env.TestEvoUnit" name="test_connection_closed_409" time="0.260" /><testcase classname="tests.backend_test_v15_evolution_env.TestEvoUnit" name="test_generic_500_maps_502" time="0.002" /><testcase classname="tests.backend_test_v15_evolution_env.TestEvoUnit" name="test_unreachable_502" time="0.001" /><testcase classname="tests.backend_test_v15_evolution_env.TestEvoUnit" name="test_not_configured_503" time="0.001" /><testcase classname="tests.backend_test_v15_evolution_env.TestEvoUnit" name="test_need_open_close_state_409" time="0.001" /><testcase classname="tests.backend_test_v15_evolution_env.TestEvoUnit" name="test_list_json_error_body_does_not_crash" time="0.001"><failure message="AttributeError: 'list' object has no attribute 'get'">tests/backend_test_v15_evolution_env.py:212: in test_list_json_error_body_does_not_crash
+    asyncio.run(wa.evo(CFG, "POST", "/x", {}))
+/usr/local/lib/python3.11/asyncio/runners.py:190: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/asyncio/base_events.py:654: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+routes/whatsapp.py:94: in evo
+    msg = _evo_error(r)
+          ^^^^^^^^^^^^^
+routes/whatsapp.py:49: in _evo_error
+    resp = (r.json() or {}).get("response") or {}
+           ^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'list' object has no attribute 'get'</failure></testcase><testcase classname="tests.backend_test_v15_evolution_env.TestSettingsRemoved" name="test_patch_wa_settings_gone" time="0.511" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_lead_send" time="1.807" /><testcase classname="tests.backend_test_v15_evolution_env.TestSettingsRemoved" name="test_get_wa_settings_gone" time="0.073" /><testcase classname="tests.backend_test_v15_evolution_env.TestSettingsRemoved" name="test_generic_settings_ignores_evolution_fields" time="0.239" /><testcase classname="tests.backend_test_v15_evolution_env.TestStatus" name="test_admin_status" time="0.856" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_lead_send_empty_400" time="0.079" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_lead_sync" time="1.052" /><testcase classname="tests.backend_test_v15_evolution_env.TestStatus" name="test_exec_status_hides_admin_fields" time="1.235" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_conversation_send" time="0.988" /><testcase classname="tests.backend_test_v15_evolution_env.TestStatus" name="test_status_no_secrets_leaked" time="0.865" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_qrcode" time="0.916" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_qrcode_exec_forbidden" time="0.429" /><testcase classname="tests.backend_test_v15_evolution_env.TestCleanErrors" name="test_sync_all" time="0.873" /></testsuite></testsuites>
