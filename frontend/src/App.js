@@ -22,6 +22,7 @@ import WhatsAppTemplates from "@/pages/WhatsAppTemplates";
 import BulkAllocation from "@/pages/BulkAllocation";
 import ChannelPartners from "@/pages/ChannelPartners";
 import Proposals from "@/pages/Proposals";
+import SuperAdmin from "@/pages/SuperAdmin";
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -65,6 +66,7 @@ function AppRoutes() {
         <Route path="proposals" element={<Proposals />} />
         <Route path="team" element={<Team />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="super-admin" element={<SuperAdmin />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

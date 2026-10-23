@@ -5,13 +5,20 @@ import { api, formatApiError } from "@/lib/api";
 import {
   LayoutDashboard, Users2, Building2, BedDouble, CalendarClock, BellRing,
   UserCog, Settings as SettingsIcon, LogOut, BarChart3, UploadCloud,
-  MessageSquareText, ShuffleIcon, Handshake, FileText, User,
+  MessageSquareText, ShuffleIcon, Handshake, FileText, User, Landmark,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { NAV, AUTH } from "@/constants/testIds";
 import { toast } from "sonner";
 
 const GROUPS = [
+  {
+    label: "Super Admin",
+    superOnly: true,
+    items: [
+      { to: "/super-admin", label: "All Organisations", icon: Landmark, testId: "nav-super-admin" },
+    ],
+  },
   {
     label: "Workspace",
     items: [
@@ -73,7 +80,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="relative z-10 flex-1 px-3 space-y-5 overflow-y-auto pb-6">
-        {GROUPS.map((g) => (
+        {GROUPS.filter((g) => !g.superOnly || user?.is_super_admin).map((g) => (
           <div key={g.label}>
             <div className="px-3 pb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">{g.label}</div>
             <div className="space-y-0.5">
@@ -115,7 +122,7 @@ export default function Sidebar() {
           </button>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-semibold truncate">{user?.name}</div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{user?.role}{user?.phone ? "" : " · set phone"}</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">{user?.is_super_admin ? "super admin" : user?.role}{user?.phone ? "" : " · set phone"}</div>
           </div>
           <button
             data-testid={AUTH.logoutBtn}

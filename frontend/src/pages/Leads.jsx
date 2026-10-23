@@ -261,6 +261,7 @@ function KanbanBoard({ leads, onMove, users }) {
                         <div className="text-[11px] text-forest/60 truncate">{owner.name}</div>
                       </div>
                     )}
+                    <CoOwnerTags lead={l} users={users} />
                   </div>
                 );
               })}
@@ -268,6 +269,18 @@ function KanbanBoard({ leads, onMove, users }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function CoOwnerTags({ lead, users }) {
+  const coOwners = users.filter((u) => (lead.co_assigned_to || []).includes(u.id));
+  if (!coOwners.length) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1" data-testid={`lead-coowners-${lead.id}`}>
+      {coOwners.map((c) => (
+        <span key={c.id} className="text-[9px] uppercase tracking-[0.12em] font-bold rounded-sm bg-wheat/30 text-forest px-1.5 py-0.5">Co-owner: {c.name}</span>
+      ))}
     </div>
   );
 }
@@ -310,7 +323,7 @@ function LeadsTable({ leads, users }) {
                 </td>
                 <td className="px-4 py-3 text-forest/70 text-xs">{SOURCE_LABEL[l.source] || l.source}</td>
                 <td className="px-4 py-3"><StageBadge stage={l.stage} /></td>
-                <td className="px-4 py-3 text-forest/70 text-xs">{owner?.name || "—"}</td>
+                <td className="px-4 py-3 text-forest/70 text-xs">{owner?.name || "—"}<CoOwnerTags lead={l} users={users} /></td>
                 <td className="px-4 py-3 text-forest/70 text-xs tabular-nums">{inr(l.budget_min)} – {inr(l.budget_max)}</td>
                 <td className="px-4 py-3 text-forest/50 text-xs">{relTime(l.created_at)}</td>
               </tr>
@@ -337,6 +350,7 @@ export default function Leads() {
   const [stage, setStage] = useState(params.get("stage") || "");
   const [source, setSource] = useState(params.get("source") || "");
   const [execFilter, setExecFilter] = useState(params.get("assigned_to") || "");
+  const [ownerMode, setOwnerMode] = useState(params.get("owner_mode") || "any");
   const [projectFilter, setProjectFilter] = useState(params.get("project_id") || "");
   const [createdFilter, setCreatedFilter] = useState(params.get("created") || "");
   const [loading, setLoading] = useState(false);
@@ -348,11 +362,12 @@ export default function Leads() {
     if (stage) next.set("stage", stage);
     if (source) next.set("source", source);
     if (execFilter) next.set("assigned_to", execFilter);
+    if (execFilter && ownerMode !== "any") next.set("owner_mode", ownerMode);
     if (projectFilter) next.set("project_id", projectFilter);
     if (createdFilter) next.set("created", createdFilter);
     setParams(next, { replace: true });
     // eslint-disable-next-line
-  }, [stage, source, execFilter, projectFilter, createdFilter]);
+  }, [stage, source, execFilter, ownerMode, projectFilter, createdFilter]);
 
   const load = async () => {
     setLoading(true);
@@ -361,7 +376,7 @@ export default function Leads() {
       if (projectFilter) params.project_id = projectFilter;
       if (stage) params.stage = stage;
       if (source) params.source = source;
-      if (execFilter) params.assigned_to = execFilter;
+      if (execFilter) { params.assigned_to = execFilter; params.owner_mode = ownerMode; }
       if (q) params.search = q;
       const [leadsR, usersR, projR] = await Promise.all([
         api.get("/leads", { params }),
@@ -382,7 +397,7 @@ export default function Leads() {
     }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stage, source, q, execFilter, projectFilter, createdFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [stage, source, q, execFilter, ownerMode, projectFilter, createdFilter]);
 
   const move = async (leadId, newStage) => {
     setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, stage: newStage } : l)));
@@ -453,6 +468,14 @@ export default function Leads() {
           <SelectContent>
             <SelectItem value="__all__">All executives</SelectItem>
             {users.filter((u) => u.role === "executive").map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={ownerMode} onValueChange={setOwnerMode} disabled={!execFilter}>
+          <SelectTrigger data-testid="leads-filter-owner-mode" className="w-[160px] h-8 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Ownership" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="any">Owner or co-owner</SelectItem>
+            <SelectItem value="primary">Primary owner</SelectItem>
+            <SelectItem value="co_owner">Co-owner only</SelectItem>
           </SelectContent>
         </Select>
         <Select value={projectFilter || "__all__"} onValueChange={(v) => setProjectFilter(v === "__all__" ? "" : v)}>

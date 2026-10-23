@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { CoOwnerPicker } from "@/components/CoOwnerPicker";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { api, formatApiError, STAGE_META, STAGE_LABEL, SOURCE_LABEL, inr, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -208,7 +209,7 @@ function EditLeadDialog({ lead, projects, onSaved }) {
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <F label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} testId="lead-edit-name" />
-            <F label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} testId="lead-edit-phone" />
+            {lead.phone_masked ? <F label="Phone (hidden)" value={form.phone} onChange={() => {}} testId="lead-edit-phone" /> : <F label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} testId="lead-edit-phone" />}
           </div>
           <F label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} testId="lead-edit-email" />
           <div className="grid grid-cols-2 gap-3">
@@ -367,7 +368,7 @@ export default function LeadDetail() {
                   <StarRating value={lead.stars || 0} onChange={setStars} size={20} testIdBase="lead-star" />
                 </div>
                 <div className="flex items-center gap-4 mt-3 text-sm text-forest/70">
-                  {lead.phone && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {lead.phone}</span>}
+                  {lead.phone && <span data-testid="lead-phone" className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5" /> {lead.phone}{lead.phone_masked && <span className="text-[9px] uppercase tracking-[0.15em] font-bold text-forest/40">masked</span>}</span>}
                   {lead.email && <span className="inline-flex items-center gap-1.5"><Mail className="h-3.5 w-3.5" /> {lead.email}</span>}
                 </div>
               </div>
@@ -525,6 +526,7 @@ export default function LeadDetail() {
                 </SelectContent>
               </Select>
             )}
+            <CoOwnerPicker lead={lead} users={users} canEdit={canReassign} onSaved={load} />
           </div>
 
           <div className="border border-[#E6E4DD] bg-white rounded-sm p-6 space-y-3">
@@ -590,7 +592,7 @@ export default function LeadDetail() {
               </DialogContent>
             </Dialog>
 
-            {lead.phone && (
+            {lead.phone && !lead.phone_masked && (
               <a href={`https://wa.me/${lead.phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="w-full h-10 rounded-sm bg-[#25D366]/10 text-[#128C7E] text-sm font-medium inline-flex items-center justify-center gap-2 hover:bg-[#25D366]/20 transition-colors duration-150">
                 <MessageSquare className="h-4 w-4" /> WhatsApp
               </a>

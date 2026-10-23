@@ -11,6 +11,7 @@ import {
 import { Building2, Search } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import NotificationBell from "@/components/NotificationBell";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
 
 const TITLES = {
   "/": "Overview",
@@ -27,6 +28,7 @@ const TITLES = {
   "/bulk-allocation": "Bulk Lead Allocation",
   "/partners": "Channel Partners",
   "/proposals": "Proposals",
+  "/super-admin": "Super Admin",
 };
 
 export default function Topbar() {
@@ -61,6 +63,7 @@ export default function Topbar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <OrgSwitcher />
           {showSwitcher && (
             <>
               <Building2 className="h-4 w-4 text-forest/60" />

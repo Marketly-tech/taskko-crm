@@ -1,0 +1,3 @@
+[lint.per-file-ignores]
+"routes/*.py" = ["F403", "F405", "F401"]
+"server.py" = ["F403", "F405", "F401"]
