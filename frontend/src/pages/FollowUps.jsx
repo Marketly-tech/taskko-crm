@@ -112,10 +112,10 @@ export default function FollowUps() {
       {overdue.length > 0 && (
         <Section title="Overdue" tone="clay" items={overdue} leads={leads} onComplete={complete} />
       )}
-      <Section title="Upcoming" tone="forest" items={upcoming} leads={leads} onComplete={complete} />
+      {upcoming.length > 0 && <Section title="Upcoming" tone="forest" items={upcoming} leads={leads} onComplete={complete} />}
       {items.length === 0 && (
-        <div className="border border-dashed border-[#E6E4DD] rounded-sm p-12 text-center text-forest/50 text-sm">
-          You're all caught up.
+        <div data-testid="followups-empty" className="border border-dashed border-[#E6E4DD] rounded-sm p-12 text-center text-forest/50 text-sm">
+          {preset || stage || projectParam || status !== "pending" ? "No follow-ups match these filters." : "You're all caught up."}
         </div>
       )}
     </div>
@@ -148,7 +148,7 @@ function Section({ title, tone, items, leads, onComplete }) {
                 ) : <span className="text-forest/50">Lead removed</span>}
                 <div className="text-xs text-forest/60 mt-0.5">
                   <span className="uppercase tracking-[0.15em] font-bold text-[10px] mr-2">{i.kind}</span>
-                  {lead?.stage && <span data-testid={`followup-stage-${i.id}`} className="text-[10px] uppercase tracking-[0.12em] border border-[#E6E4DD] rounded-sm px-1.5 py-0.5 mr-2">{STAGE_LABEL[lead.stage] || lead.stage}</span>}
+                  {lead?.stage && <span data-testid={`followup-stage-${i.id}`} className="text-[10px] uppercase tracking-[0.12em] font-bold text-forest bg-bone-alt border border-[#E6E4DD] rounded-sm px-1.5 py-0.5 mr-2">{STAGE_LABEL[lead.stage] || lead.stage}</span>}
                   {new Date(i.due_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
                   <span className={`ml-2 ${overdue ? "text-clay font-medium" : "text-forest/40"}`}>· {relTime(i.due_at)}</span>
                 </div>

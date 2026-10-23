@@ -41,7 +41,8 @@ async def update_project(project_id: str, body: ProjectBody, actor: dict = Depen
 async def delete_project(project_id: str, actor: dict = Depends(require_roles("admin"))):
     await db.projects.delete_one({"id": project_id})
     await db.units.delete_many({"project_id": project_id})
-    return {"ok": True}
+    moved = await db.leads.update_many({"project_id": project_id}, {"$set": {"project_id": None, "updated_at": now_utc().isoformat()}})
+    return {"ok": True, "leads_unassigned": moved.modified_count}
 
 
 # ---------------------------------------------------------------------------

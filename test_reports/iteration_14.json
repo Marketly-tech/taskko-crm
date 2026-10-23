@@ -1,0 +1,38 @@
+{
+  "summary": "Tested project-required leads, unassigned-project bucket/move, follow-up date/stage/status/project filters and the universal top-right project picker. Backend: 11/11 pytest pass (create/patch validation, ?project_id=none, unassigned count + exec 403, move with invalid project 400, full move flow in org2 via a lead source with no project, follow-up filters on their own and combined, site-visits project=none). Frontend: everything in the request works. Follow-ups filter bar: date presets, custom From/To, stage, status (defaults to Pending and stays set), stage badges, header counts and the project picker. Leads: local project filter removed, picker filters kanban and list (All 100 / Unassigned 46 / Meridian 21), banner count 46, 'View them' switches the picker to Unassigned project, move confirm works (dismissed in org1; accepted in org2 -> '2 lead(s) moved' toast, banner hidden), create without project -> 'Pick a project for this lead' toast, edit dialog has no None option. Regression: Site Visits filters by picker (10/1/4/0), Inventory works, 'All projects' persists after reload. Executive sees no banner. Org1 unassigned count is still 46 (nothing moved). All TEST data in org2 was removed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/projects/{id}", "issue": "Deleting a project does not touch its leads, so they keep a project_id that points to a deleted project. Those leads are no longer in the Unassigned bucket (count/none filter look only for null or empty) and match no project filter, which breaks the rule that every lead maps to a project. Fix: block deletion while leads exist, or set their project_id to null so they fall into Unassigned."},
+      {"endpoint": "DELETE /api/leads/{id}", "issue": "Follow-ups (and site visits) of deleted leads are not removed. Under 'All projects', the Follow-ups page shows orphan rows labelled 'Lead removed' (org1 follow-up for lead 9e27509c...). Seen as admin and as executive. Cascade the delete to db.follow_ups and db.site_visits."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Follow-ups", "issues": [
+        "Custom From/To use the browser's native <input type=date> instead of the shadcn Calendar/Popover date picker used elsewhere",
+        "When filters return nothing, two empty states show at once: 'Nothing here.' in the Upcoming section and a separate 'You're all caught up.' box. The 'caught up' text is also misleading when the list is only empty because of a filter.",
+        "The stage badge text (text-forest/60 at 10px) has low contrast"
+      ]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v14_project_required_followup_filters.py", "/app/test_reports/pytest/pytest_results_v14.xml"],
+  "action_items": [
+    "Handle leads when a project is deleted (block the delete, or set project_id to null so they show as Unassigned)",
+    "Cascade lead delete to follow_ups and site_visits so no orphan 'Lead removed' rows appear",
+    "Optional: replace the native date inputs on Follow-ups with the shadcn Calendar; merge the two empty states into one"
+  ],
+  "critical_code_review_comments": [
+    "LeadCreateDialog sets project_id from activeProjectId only once, in the initial useState. If the user changes the top picker after the page mounts, the create dialog default does not follow it.",
+    "Stage/status SelectItems on Follow-ups and project SelectItems in UnassignedBanner/LeadCreateDialog have no data-testid",
+    "FollowUps loads the full /leads list (up to 2000) on every filter change just to resolve names and stages. Returning lead name and stage with each follow-up would be cheaper."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v14_project_required_followup_filters.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Org2 (skyline) got a temporary TEST project, a lead source and 2 ingested leads, which were moved through the UI and then deleted. Org1 had TEST_ leads/follow-ups created and deleted by pytest. Org1's 46 unassigned leads were not changed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Picker testid is topbar-project-switcher, with options project-option-unassigned and project-option-<id>; the value is kept in localStorage 'tasko.activeProject' (__all__/__none__/id). Org1 has 46 leads with no project, which the user will move himself; do NOT move them. Test moves in org2 (admin@skyline.com) by ingesting through /api/v1/leads with a lead source that has no project. The move button opens a window.confirm dialog. Follow-up seed data is all overdue (server date Oct 2026)."
+}

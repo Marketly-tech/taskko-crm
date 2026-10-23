@@ -29,6 +29,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 
 - Iteration 13 (Jun 2026): **Google Calendar invites for site visits** (`routes/calendar_invites.py`). Settings toggle + org sender email/name/visit length + domain status + test invite. On create/reschedule/cancel/delete an .ics (METHOD REQUEST/CANCEL, stable UID, SEQUENCE) is emailed per-recipient to the assigned exec, co-owners and customer from the org's email. Reminder emails at 1d/2h/10m via APScheduler `visit-reminders` (atomic claim). Site Visits agenda shows invite status + resend button. Delivery requires the org's sender domain verified in Resend.
 
+- Iteration 14 (Jun 2026): Follow-ups filters (date quick picks Overdue/Today/Tomorrow/This week + custom, stage, status retained, top project picker). Project compulsory on manual create/edit (`_require_project`); live/imported leads without project sit in "Unassigned project" bucket (`project_id=none` filter, picker option). Leads page uses the global top-right picker; banner to move all unassigned leads to one project (`/api/leads/unassigned-project[/move]`). Deleting a project moves its leads to Unassigned; deleting a lead removes its follow-ups/visits.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).
