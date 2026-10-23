@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { CoOwnerPicker } from "@/components/CoOwnerPicker";
+import { WhatsAppChat } from "@/components/WhatsAppChat";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import { api, formatApiError, STAGE_META, STAGE_LABEL, SOURCE_LABEL, inr, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -290,6 +291,7 @@ export default function LeadDetail() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [leadId]);
+  useEffect(() => { if (lead && window.location.search.includes("tab=whatsapp")) document.getElementById("lead-whatsapp")?.scrollIntoView({ behavior: "smooth" }); }, [lead]);
 
   if (!lead) return <div className="text-forest/50 text-sm">Loading lead…</div>;
 
@@ -427,6 +429,12 @@ export default function LeadDetail() {
             <LogCallDialog leadId={leadId} onSaved={load} />
             <LogSmsDialog leadId={leadId} onSaved={load} templates={templates} />
             <LogEmailDialog leadId={leadId} onSaved={load} />
+          </div>
+
+          <div id="lead-whatsapp" data-testid="lead-whatsapp-section" className="border border-[#E6E4DD] bg-white rounded-sm p-6">
+            <div className="label-caps">WhatsApp</div>
+            <h3 className="font-display font-bold text-xl text-forest tracking-tight mt-1 mb-4">Conversation</h3>
+            <WhatsAppChat fetchPath={`/leads/${leadId}/whatsapp`} sendPath={`/leads/${leadId}/whatsapp/messages`} syncPath={`/leads/${leadId}/whatsapp/sync`} height="h-[320px]" testId="lead-wa-chat" />
           </div>
 
           {/* Timeline */}
@@ -593,8 +601,8 @@ export default function LeadDetail() {
               </DialogContent>
             </Dialog>
 
-            {lead.phone && !lead.phone_masked && (
-              <a href={`https://wa.me/${lead.phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="w-full h-10 rounded-sm bg-[#25D366]/10 text-[#128C7E] text-sm font-medium inline-flex items-center justify-center gap-2 hover:bg-[#25D366]/20 transition-colors duration-150">
+            {lead.phone && (
+              <a data-testid="lead-whatsapp-btn" href="#lead-whatsapp" onClick={(e) => { e.preventDefault(); document.getElementById("lead-whatsapp")?.scrollIntoView({ behavior: "smooth" }); }} className="w-full h-10 rounded-sm bg-[#25D366]/10 text-[#128C7E] text-sm font-medium inline-flex items-center justify-center gap-2 hover:bg-[#25D366]/20 transition-colors duration-150">
                 <MessageSquare className="h-4 w-4" /> WhatsApp
               </a>
             )}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, formatApiError, SOURCE_LABEL, STAGE_META, STAGE_LABEL } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ReportFilters, initialReportFilters } from "@/components/reports/ReportFilters";
@@ -18,10 +19,11 @@ const COLS = {
   daily: [{ key: "date", label: "Date" }, { key: "outgoing_calls", label: "Calls" }, { key: "answered", label: "Answered" }, { key: "whatsapp_sent", label: "WhatsApp" }, { key: "sms_sent", label: "SMS" }, { key: "email_sent", label: "Email" }, { key: "followups", label: "Follow-ups" }, { key: "site_visits", label: "Visits set" }],
   status: [{ key: "user", label: "Owner" }, { key: "total", label: "Total" }, ...STAGE_META.map((s) => ({ key: s.key, label: s.label }))],
   lost: [{ key: "name", label: "Lead", render: (v, r) => <Link to={`/leads/${r.id}`} className="underline underline-offset-2 hover:text-clay">{v}</Link> }, { key: "phone", label: "Phone" }, { key: "source", label: "Source", render: src }, { key: "stage", label: "Stage", render: (v) => STAGE_LABEL[v] || v }, { key: "reason", label: "Reason" }, { key: "owner", label: "Owner" }, { key: "updated_at", label: "Updated", render: date }],
-  calls: [{ key: "lead_name", label: "Lead", render: (v, r) => <Link to={`/leads/${r.lead_id}`} className="underline underline-offset-2">{v}</Link> }, { key: "phone", label: "Phone" }, { key: "user", label: "User" }, { key: "status", label: "Status" }, { key: "duration_sec", label: "Sec" }, { key: "created_at", label: "Time", render: (v) => (v ? new Date(v).toLocaleString() : "—") }],
+  calls: [{ key: "lead_name", label: "Lead", render: (v, r) => <Link to={`/leads/${r.lead_id}`} className="underline underline-offset-2">{v}</Link> }, { key: "phone", label: "Phone" }, { key: "user", label: "User" }, { key: "status", label: "Status", render: (v) => String(v || "").replace(/_/g, " ") }, { key: "duration_sec", label: "Sec" }, { key: "created_at", label: "Time", render: (v) => (v ? new Date(v).toLocaleString() : "—") }],
 };
 
 export default function Reports() {
+  const { user } = useAuth();
   const [filters, setFilters] = useState(initialReportFilters);
   const [users, setUsers] = useState([]);
   const [d, setD] = useState({ summary: null, activity: [], daily: [], status: [], lost: [], reasons: [], sources: [], execs: [] });
@@ -63,7 +65,7 @@ export default function Reports() {
         <h2 className="font-display font-black text-3xl text-forest tracking-tight mt-1">Reports</h2>
         <div className="text-sm text-forest/60 mt-1">Lead sources, outreach telemetry, pipeline by owner and lost-lead reasons.</div>
       </div>
-      <ReportFilters value={filters} onChange={setFilters} onApply={load} users={users} busy={busy} />
+      <ReportFilters value={filters} onChange={setFilters} onApply={load} users={users} busy={busy} showUser={user?.role !== "executive"} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
         <Metric testId="report-kpi-leads" label="Leads" value={t.leads} />
@@ -116,7 +118,7 @@ export default function Reports() {
       </ReportSection>
 
       <Dialog open={!!calls} onOpenChange={(o) => !o && setCalls(null)}>
-        <DialogContent className="rounded-sm max-w-3xl">
+        <DialogContent className="rounded-sm max-w-5xl">
           <DialogHeader><DialogTitle className="font-display text-2xl">{calls?.type === "missed" ? "Missed calls" : "Outgoing calls"} ({calls?.rows.length || 0})</DialogTitle></DialogHeader>
           <ReportTable columns={COLS.calls} rows={calls?.rows || []} testId="report-calls-table" />
         </DialogContent>

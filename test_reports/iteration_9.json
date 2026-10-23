@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 9 - Phase 3 (Reports w/ global date range + new reports, Site Visit calendar) and Phase 4 (CallerDesk mocked integration). Backend: 52/52 pytest pass (/app/backend/tests/backend_test_v9_reports_callerdesk.py) - all 9 report endpoints 200, invalid date & start>end -> 400 on every report, daily = one row per day (30 for June) and >366 days -> 400, user-status has 11 stage columns + total consistent, not-interested phone masked for manager, lost-reasons sums match, calls outgoing/missed (bad call_type 422), executive scoped to own data (summary == admin assigned_to=priya, user-status/executives/activity own only), skyline admin sees zeros. CallerDesk: status configured=false provider twilio; manager PATCH settings 403; exec 403 on dashboard/call-logs/campaigns; provider=callerdesk -> POST /leads/{id}/call returns pending_credentials mock=true + callerdesk_calls row + lead activity; actor without phone (priya) -> 400; call-logs filters + masking for manager + no _id/raw; campaigns create (400 when no valid numbers), list counts, PATCH, start dials batch of calls_per_minute (2 -> pending_credentials, 2 remain pending), pause, cancel (pending -> cancelled), 404 for unknown; webhook ANSWER/42s creates lead + connected incoming log, NO ANSWER matches same lead -> dnp + missed_call notification to owner (verified in DB), unknown org 404. Regression v8: 48/48 pass (incl. previously failing cross-org assign). calling_provider restored to 'twilio' (verified). Frontend (Playwright, desktop 1920): Reports page all testids present, presets update start/end, Apply refreshes KPIs (6mo 55 leads/112 calls -> 7d 1 lead -> ytd 146 calls), calls & missed KPI dialogs open with report-calls-table, sources CSV downloads, lost reasons chips, user-status/NI/exec sections render. Site Visits calendar default, prev/next/today, day panel with visit links navigating to lead, agenda toggle and back. CallerDesk page: dashboard banner + 6 stats, all 5 tabs for admin, settings toggle/status/webhook/key inputs, dialer search + call -> 'pending' toast, campaign create/start/pause/view numbers/cancel, logs filters; manager sees nav + no settings tab + masked phones; exec has no nav. dash-call-report-card is on the Overview 'Action items' tab and links to /callerdesk/logs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/callerdesk/webhook", "issue": "Returns 500 on malformed JSON body and on non-numeric talk_duration (int('abc')). Wrap request.json() in try/except -> 400 and parse duration safely."},
+      {"endpoint": "POST /api/callerdesk/webhook", "issue": "Public, unauthenticated and no webhook secret configured by default -> anyone knowing ?org=tasko can create leads/fake call logs/notifications. Recommend requiring secret once keys are added."},
+      {"endpoint": "run_campaign_batch / campaign_tick", "issue": "Campaign start and scheduler dial via CallerDesk regardless of calling_provider; an 'active' campaign keeps logging calls after provider switched back to twilio."},
+      {"endpoint": "/api/reports/*", "issue": "pending_credentials (mock) CallerDesk calls are counted as outgoing calls in reports (summary/activity/daily/calls) - inflates telemetry. Also executive scope uses assigned_to only (co-owned leads excluded)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CallerDesk route", "issue": "Executive can open /callerdesk directly (no route guard) - page renders tabs/zeros and shows 2x 'Insufficient permissions' toasts. Should redirect/403 page for executive.", "selector": "[data-testid='callerdesk-page']", "priority": "MEDIUM"},
+      {"component": "CallerDesk Campaigns", "issue": "Expanded numbers panel (cd-camp-numbers-<id>) is not refreshed after Start/Pause/Cancel - shows stale PENDING after cancel. Also shows phone twice when lead_name missing.", "selector": "[data-testid^='cd-camp-numbers-']", "priority": "LOW"},
+      {"component": "CallerDesk Settings for manager", "issue": "/callerdesk/settings as manager renders blank content with no tab selected (no message/redirect).", "selector": "[data-testid='callerdesk-page']", "priority": "LOW"},
+      {"component": "VisitCalendar", "issue": "calendar-day-<date> testid uses toISOString() of local midnight -> off by one day in timezones east of UTC (e.g. IST). Use local y-m-d formatting.", "selector": "[data-testid^='calendar-day-']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Reports calls dialog", "issues": ["Raw statuses shown (no_answer, pending_credentials) - humanize", "Time column cut off horizontally in max-w-3xl dialog"]},
+      {"screen": "Reports filter bar (executive)", "issues": ["report-user dropdown lists all users for executive though backend ignores it - hide for executive"]},
+      {"screen": "CallerDesk Logs", "issues": ["date inputs use native browser date picker (no testids) instead of shadcn calendar; same for report-start/report-end"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v9_reports_callerdesk.py", "/app/backend/tests/backend_test_v8_multiorg.py", "/app/test_reports/pytest/pytest_v9.xml"],
+  "action_items": [
+    "Guard /callerdesk route for executives (redirect) to avoid permission-error toasts",
+    "Webhook: return 400 for malformed JSON / bad duration instead of 500",
+    "Skip/stop campaign dialling when calling_provider != callerdesk (or block start)",
+    "Refresh open campaign numbers panel after start/pause/cancel",
+    "Consider excluding pending_credentials calls from report call counts",
+    "Fix calendar-day testid timezone, hide report-user filter for executives"
+  ],
+  "critical_code_review_comments": [
+    "callerdesk.py webhook: payload parsing not wrapped, int() on untrusted input -> 500s",
+    "callerdesk.py dashboard 'today' computed in UTC, not org local (IST) - counts shift at 5:30 AM IST",
+    "reports.py loads up to 20000 activity docs in memory per request for several endpoints concurrently (8 parallel calls from Reports page) - use aggregation pipelines for scale",
+    "reports.py /reports/sources without start/end returns all-time while other reports default to last 30 days - inconsistent defaults"
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v9_reports_callerdesk.py"],
+  "success_rate": {"backend": "100% (52/52 new + 48/48 regression)", "frontend": "~92% (all requested flows work; exec route guard + minor UI issues)"},
+  "seed_data_creation": "Created TEST_ campaigns (all cancelled), TEST_CD leads (deleted), webhook 'Inbound caller 90xxxxxxxx' leads (deleted by tests) - callerdesk_calls log rows with TEST_ sids remain; pending_credentials call log rows from dialer tests remain.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run pytest /app/backend/tests/backend_test_v9_reports_callerdesk.py -n 0 and backend_test_v8_multiorg.py -n 0. The v9 admin fixture restores calling_provider=twilio on teardown. dash-call-report-card lives on Overview 'Action items' tab, not Month's updates. Seed site visits are Jul 21-22 2026 (container date Oct 2026). priya has no phone (used for 400 actor-phone test); admin/manager have phones.",
+  "rca of the issue": "Exec /callerdesk access: App.js Route path='callerdesk' has no role guard; CallerDesk.jsx Dashboard fetches /callerdesk/dashboard -> 403 toasts. Webhook 500: request.json() raises JSONDecodeError and int(payload.talk_duration) raises ValueError, both unhandled."
+}

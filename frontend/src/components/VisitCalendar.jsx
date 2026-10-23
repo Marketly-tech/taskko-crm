@@ -33,7 +33,7 @@ export const VisitCalendar = ({ visits, leads, projects }) => {
           {days.map((day) => {
             const k = day.toDateString(); const entries = byDay[k] || []; const inMonth = day.getMonth() === month.getMonth();
             return (
-              <button key={k} data-testid={`calendar-day-${day.toISOString().slice(0, 10)}`} onClick={() => setSelected(k)}
+              <button key={k} data-testid={`calendar-day-${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`} onClick={() => setSelected(k)}
                 className={`min-h-24 p-1.5 border-b border-r border-[#E6E4DD] text-left align-top transition-colors duration-150 ${inMonth ? "bg-white" : "bg-bone-alt/25 text-forest/35"} ${selected === k ? "ring-2 ring-inset ring-forest" : "hover:bg-bone-alt/40"}`}>
                 <div className={`text-xs font-bold mb-1 inline-grid place-items-center h-5 min-w-5 px-1 rounded-sm ${k === today ? "bg-clay text-white" : ""}`}>{day.getDate()}</div>
                 <div className="space-y-0.5">

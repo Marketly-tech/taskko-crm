@@ -20,7 +20,7 @@ export const initialReportFilters = () => {
 
 const inputCls = "mt-1 w-full h-9 border border-[#E6E4DD] rounded-sm px-2 text-sm text-forest bg-white focus:outline-none focus:border-forest";
 
-export const ReportFilters = ({ value, onChange, onApply, users, busy }) => {
+export const ReportFilters = ({ value, onChange, onApply, users, busy, showUser = true }) => {
   const set = (k, v) => onChange({ ...value, [k]: v, ...(k === "start" || k === "end" ? { preset: "" } : {}) });
   const preset = (p) => { const [start, end] = p.range(); onChange({ ...value, preset: p.key, start, end }); };
   return (
@@ -48,12 +48,12 @@ export const ReportFilters = ({ value, onChange, onApply, users, busy }) => {
             {Object.entries(SOURCE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
         </label>
-        <label className="text-xs text-forest/60">User
+        {showUser && <label className="text-xs text-forest/60">User
           <select data-testid="report-user" value={value.assigned_to} onChange={(e) => set("assigned_to", e.target.value)} className={inputCls}>
             <option value="all">All users</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
-        </label>
+        </label>}
         <button data-testid="report-apply" onClick={onApply} disabled={busy} className="h-9 px-3 bg-forest text-white rounded-sm text-sm inline-flex items-center justify-center gap-2 hover:bg-forest-soft disabled:opacity-60 transition-colors duration-150">
           <RefreshCcw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} /> Apply
         </button>

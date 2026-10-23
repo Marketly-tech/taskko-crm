@@ -56,7 +56,8 @@ async def _activities(user, start_dt, end_dt, assigned_to=None) -> list:
 
 
 def _is_out(a: dict) -> bool:
-    return a.get("kind") in CALL_KINDS and (a.get("meta") or {}).get("direction", "outgoing") == "outgoing"
+    meta = a.get("meta") or {}
+    return a.get("kind") in CALL_KINDS and meta.get("direction", "outgoing") == "outgoing" and meta.get("status") != "pending_credentials" and not meta.get("mock")
 
 
 def _is_missed(a: dict) -> bool:

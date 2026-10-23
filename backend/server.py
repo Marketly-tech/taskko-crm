@@ -1,12 +1,12 @@
 """Tasko CRM - FastAPI app entrypoint."""
 from core import *  # noqa: F401,F403
-from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk
+from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp
 from routes.organizations import ensure_organizations, for_each_org
 from routes.eod import send_eod_email_to_admins
 from routes.notifications import refresh_notifications
 
 app = FastAPI(title="Tasko CRM API")
-for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk):
+for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp):
     app.include_router(_m.router)
 
 

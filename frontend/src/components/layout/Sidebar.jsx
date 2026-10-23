@@ -5,7 +5,7 @@ import { api, formatApiError } from "@/lib/api";
 import {
   LayoutDashboard, Users2, Building2, BedDouble, CalendarClock, BellRing,
   UserCog, Settings as SettingsIcon, LogOut, BarChart3, UploadCloud,
-  MessageSquareText, ShuffleIcon, Handshake, FileText, User, Landmark, PhoneCall,
+  MessageSquareText, ShuffleIcon, Handshake, FileText, User, Landmark, PhoneCall, MessageCircle,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { NAV, AUTH } from "@/constants/testIds";
@@ -26,6 +26,7 @@ const GROUPS = [
       { to: "/leads", label: "Leads", icon: Users2, testId: NAV.itemLeads },
       { to: "/site-visits", label: "Site Visits", icon: CalendarClock, testId: NAV.itemVisits },
       { to: "/follow-ups", label: "Follow-ups", icon: BellRing, testId: NAV.itemFollowups },
+      { to: "/whatsapp", label: "WhatsApp Inbox", icon: MessageCircle, testId: "nav-whatsapp" },
       { to: "/callerdesk", label: "CallerDesk", icon: PhoneCall, testId: "nav-callerdesk", role: ["admin", "manager"] },
     ],
   },

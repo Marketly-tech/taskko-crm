@@ -300,6 +300,8 @@ async def run_campaign_batch(cid: str, actor: dict) -> dict:
 
 @router.post("/callerdesk/campaigns/{cid}/start")
 async def start_campaign(cid: str, actor: dict = Depends(require_roles("admin", "manager"))):
+    if (await cd_settings())["calling_provider"] != "callerdesk":
+        raise HTTPException(status_code=400, detail="Turn on CallerDesk calling in CallerDesk Settings before starting a campaign")
     await db.callerdesk_campaigns.update_one({"id": cid}, {"$set": {"status": "active", "started_by": actor["id"], "updated_at": now_utc().isoformat()}})
     return await run_campaign_batch(cid, actor)
 
@@ -331,6 +333,8 @@ async def campaign_calls(cid: str, status: Optional[str] = None, search: Optiona
 
 async def campaign_tick() -> None:
     """Scheduler job: dial the next batch of every active campaign."""
+    if (await cd_settings())["calling_provider"] != "callerdesk":
+        return
     async for c in db.callerdesk_campaigns.find({"status": "active"}, {"_id": 0}):
         actor = await db.users.find_one({"id": c.get("started_by") or c.get("created_by")}, {"_id": 0, "password_hash": 0})
         if actor:
@@ -339,7 +343,12 @@ async def campaign_tick() -> None:
 
 @router.post("/callerdesk/webhook")
 async def callerdesk_webhook(request: Request, org: Optional[str] = None):
-    payload = await request.json() if "application/json" in (request.headers.get("content-type") or "") else dict(await request.form())
+    try:
+        payload = await request.json() if "application/json" in (request.headers.get("content-type") or "") else dict(await request.form())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid webhook body")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid webhook body")
     payload = {**dict(request.query_params), **payload}
     payload.pop("org", None)
     o = await raw_db.organizations.find_one({"$or": [{"slug": org}, {"id": org}]} if org else {}, {"_id": 0, "id": 1}, sort=[("created_at", 1)])
@@ -350,7 +359,8 @@ async def callerdesk_webhook(request: Request, org: Optional[str] = None):
     if s["webhook_secret"] and s["webhook_secret"] not in (payload.get("secret"), request.headers.get("X-CallerDesk-Secret")):
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
     sid = payload.get("sid_id") or payload.get("call_sid") or payload.get("CallSid") or payload.get("id")
-    duration = int(payload.get("talk_duration") or payload.get("total_duration") or payload.get("duration") or 0)
+    raw_dur = str(payload.get("talk_duration") or payload.get("total_duration") or payload.get("duration") or 0)
+    duration = int(raw_dur) if raw_dur.isdigit() else 0
     status = normalize_status(payload.get("callstatus") or payload.get("status"), duration)
     direction = "outgoing" if str(payload.get("callresult") or payload.get("Flow_type") or "").upper() in {"WEBOBD", "CLICK-TO-CALL", "CLICK_TO_CALL"} else (payload.get("direction") or "incoming")
     p_from = payload.get("caller_num") or payload.get("from")

@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { api, formatApiError, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { Switch } from "@/components/ui/switch";
-import { LayoutDashboard, PhoneCall, ListOrdered, ScrollText, Settings2, PhoneOutgoing, PhoneMissed, PhoneOff, Play, Pause, Trash2, Search } from "lucide-react";
+import { LayoutDashboard, PhoneCall, ListOrdered, MessageSquareText, ScrollText, Settings2, PhoneOutgoing, PhoneMissed, PhoneOff, Play, Pause, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 
 const TABS = [
   { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { key: "dialer", label: "Dialer", icon: PhoneCall },
   { key: "campaigns", label: "Campaign Dialer", icon: ListOrdered },
+  { key: "message-campaigns", label: "Message Campaigns", icon: MessageSquareText },
   { key: "logs", label: "Call Logs", icon: ScrollText },
   { key: "settings", label: "Settings", icon: Settings2, admin: true },
 ];
@@ -115,6 +116,7 @@ function CampaignsTab({ leads }) {
       if (type === "delete") await api.delete(`/callerdesk/campaigns/${id}`);
       else { const { data } = await api.post(`/callerdesk/campaigns/${id}/${type}`); if (type === "start") toast.success(`Started ${data.started} call(s), ${data.pending} queued`); }
       load();
+      if (open?.id === id) view(id);
     } catch (e) { err(e); }
   };
   const view = async (id) => { const { data } = await api.get(`/callerdesk/campaigns/${id}/calls`); setOpen({ id, rows: data.items }); };
@@ -144,12 +146,50 @@ function CampaignsTab({ leads }) {
             </div>
             {open?.id === c.id && (
               <div className="mt-3 border-t border-[#E6E4DD] pt-2 max-h-48 overflow-y-auto space-y-1" data-testid={`cd-camp-numbers-${c.id}`}>
-                {open.rows.map((n) => <div key={n.id} className="text-xs flex justify-between"><span>{n.lead_name || n.phone} <span className="text-forest/50 tabular-nums">{n.phone}</span></span><span className={`uppercase font-bold ${TONE[n.status] || "text-forest/60"}`}>{n.status}</span></div>)}
+                {open.rows.map((n) => <div key={n.id} className="text-xs flex justify-between"><span>{n.lead_name || "Number"} <span className="text-forest/50 tabular-nums">{n.phone}</span></span><span className={`uppercase font-bold ${TONE[n.status] || "text-forest/60"}`}>{n.status}</span></div>)}
               </div>
             )}
           </div>
         ))}
         {!items.length && <div className="border border-dashed border-[#E6E4DD] rounded-sm p-10 text-center text-forest/50 text-sm lg:col-span-2">No campaigns yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+function MessageCampaignsTab({ leads }) {
+  const [items, setItems] = useState([]);
+  const [f, setF] = useState({ name: "", channel: "whatsapp", stage: "", subject: "", message: "Hi {name}, " });
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get("/message-campaigns").then((r) => setItems(r.data)).catch(err);
+  useEffect(() => { load(); }, []);
+  const stages = [...new Set(leads.map((l) => l.stage))];
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const run = async () => {
+    setBusy(true);
+    try { const { data } = await api.post("/message-campaigns", f); toast.success(`Sent ${data.sent} · failed ${data.failed} · skipped ${data.skipped}`); load(); }
+    catch (e) { err(e); } finally { setBusy(false); }
+  };
+  return (
+    <div className="grid lg:grid-cols-[1fr_1fr] gap-6">
+      <div className="border border-[#E6E4DD] bg-white rounded-sm p-4 space-y-3">
+        <label className="block text-xs text-forest/60">Campaign name<input data-testid="mc-name" value={f.name} onChange={set("name")} className={`${inputCls} w-full mt-1`} /></label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-xs text-forest/60">Channel<select data-testid="mc-channel" value={f.channel} onChange={set("channel")} className={`${inputCls} w-full mt-1`}><option value="whatsapp">WhatsApp</option><option value="email">Email</option></select></label>
+          <label className="text-xs text-forest/60">Leads in stage<select data-testid="mc-stage" value={f.stage} onChange={set("stage")} className={`${inputCls} w-full mt-1`}><option value="">Pick stage</option>{stages.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}</select></label>
+        </div>
+        {f.channel === "email" && <label className="block text-xs text-forest/60">Subject<input data-testid="mc-subject" value={f.subject} onChange={set("subject")} className={`${inputCls} w-full mt-1`} /></label>}
+        <label className="block text-xs text-forest/60">Message ({"{name}"} becomes the lead's name)<textarea data-testid="mc-message" value={f.message} onChange={set("message")} className="mt-1 w-full min-h-28 border border-[#E6E4DD] rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-forest" /></label>
+        <button data-testid="mc-send" disabled={busy} onClick={run} className={`${btn} bg-forest text-white hover:bg-forest-soft disabled:opacity-60`}>Send now</button>
+      </div>
+      <div className="space-y-2" data-testid="mc-list">
+        {items.map((c) => (
+          <div key={c.id} className="border border-[#E6E4DD] bg-white rounded-sm p-3">
+            <div className="flex justify-between"><span className="font-medium text-forest">{c.name}</span><span className="text-[10px] uppercase tracking-[0.15em] font-bold text-forest/50">{c.channel}</span></div>
+            <div className="text-xs text-forest/60 mt-1">Total {c.total} · Sent {c.sent} · Failed {c.failed} · Skipped {c.skipped} · {relTime(c.created_at)}</div>
+          </div>
+        ))}
+        {!items.length && <div className="border border-dashed border-[#E6E4DD] rounded-sm p-10 text-center text-forest/50 text-sm">No message campaigns yet.</div>}
       </div>
     </div>
   );
@@ -209,6 +249,8 @@ export default function CallerDesk() {
   const loadStatus = () => api.get("/callerdesk/status").then((r) => setStatus(r.data)).catch(err);
   useEffect(() => { loadStatus(); api.get("/leads").then((r) => setLeads(r.data)); }, []);
   const tabs = TABS.filter((t) => !t.admin || user?.role === "admin");
+  if (user && !["admin", "manager"].includes(user.role)) return <Navigate to="/" replace />;
+  if (feature === "settings" && user?.role !== "admin") return <Navigate to="/callerdesk/dashboard" replace />;
   return (
     <div className="space-y-6" data-testid="callerdesk-page">
       <div>
@@ -227,6 +269,7 @@ export default function CallerDesk() {
       {feature === "dashboard" && <DashboardTab status={status} />}
       {feature === "dialer" && <DialerTab leads={leads} />}
       {feature === "campaigns" && <CampaignsTab leads={leads} />}
+      {feature === "message-campaigns" && <MessageCampaignsTab leads={leads} />}
       {feature === "logs" && <LogsTab />}
       {feature === "settings" && user?.role === "admin" && <SettingsTab status={status} reload={loadStatus} />}
     </div>

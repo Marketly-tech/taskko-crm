@@ -24,6 +24,7 @@ import ChannelPartners from "@/pages/ChannelPartners";
 import Proposals from "@/pages/Proposals";
 import SuperAdmin from "@/pages/SuperAdmin";
 import CallerDesk from "@/pages/CallerDesk";
+import WhatsAppInbox from "@/pages/WhatsAppInbox";
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -68,6 +69,8 @@ function AppRoutes() {
         <Route path="team" element={<Team />} />
         <Route path="settings" element={<Settings />} />
         <Route path="super-admin" element={<SuperAdmin />} />
+        <Route path="whatsapp" element={<WhatsAppInbox />} />
+        <Route path="whatsapp/:chatId" element={<WhatsAppInbox />} />
         <Route path="callerdesk" element={<CallerDesk />} />
         <Route path="callerdesk/:feature" element={<CallerDesk />} />
       </Route>
