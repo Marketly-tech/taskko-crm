@@ -201,6 +201,11 @@ async def wa_status(user: dict = Depends(get_current_user)):
 async def wa_qrcode(actor: dict = Depends(require_roles("admin"))):
     c = await wa_cfg()
     res = await evo(c, "GET", "/instance/connect")
+    for _ in range(3):
+        if res.get("base64") or res.get("pairingCode") or ((res.get("instance") or {}).get("state") == "open"):
+            break
+        await asyncio.sleep(1.5)
+        res = await evo(c, "GET", "/instance/connect")
     return {"base64": res.get("base64"), "code": res.get("code"), "pairing_code": res.get("pairingCode")}
 
 
