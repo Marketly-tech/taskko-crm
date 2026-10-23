@@ -12,7 +12,7 @@ export const CallReportCard = () => {
   return (
     <button data-testid="dash-call-report-card" onClick={() => nav("/callerdesk/logs")} className="w-full text-left border border-[#E6E4DD] bg-white rounded-sm p-5 hover:border-forest transition-colors duration-150">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2"><PhoneCall className="h-4 w-4 text-clay" /><div className="label-caps">Call report · CallerDesk</div></div>
+        <div className="flex items-center gap-2"><PhoneCall className="h-4 w-4 text-clay" /><div className="label-caps">Business Campaign · today</div></div>
         <ArrowUpRight className="h-4 w-4 text-forest/40" />
       </div>
       <div className="grid grid-cols-5 gap-3 mt-3">

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { CallReportCard } from "@/components/CallReportCard";
+import { TeamCallReport } from "@/components/TeamCallReport";
+import { DashboardRangeBar, initialDashRange, prettyRange } from "@/components/DashboardRangeBar";
 import { api, STAGE_META, SOURCE_LABEL, inr, relTime } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { DASH } from "@/constants/testIds";
@@ -116,15 +118,16 @@ function RevenueBreakdownDialog({ open, onClose }) {
   );
 }
 
-function MonthlyTab() {
+function MonthlyTab({ range }) {
   const { user } = useAuth();
   const nav = useNavigate();
   const [data, setData] = useState(null);
   const [revOpen, setRevOpen] = useState(false);
-  useEffect(() => { api.get("/dashboard/monthly").then((r) => setData(r.data)); }, []);
+  useEffect(() => { setData(null); api.get("/dashboard/monthly", { params: { date_from: range.from, date_to: range.to } }).then((r) => setData(r.data)); }, [range.from, range.to]);
   if (!data) return <div className="text-forest/50 text-sm">Loading…</div>;
 
-  const period = `${new Date(data.period.start).toLocaleDateString("en-IN", { month: "short", day: "numeric" })} – ${new Date(new Date(data.period.end).getTime() - 86400000).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}`;
+  const period = prettyRange(range);
+  const canTeam = user?.role === "admin" || user?.role === "manager";
 
   return (
     <div className="space-y-6">
@@ -133,25 +136,27 @@ function MonthlyTab() {
           <div className="font-display font-black text-3xl text-forest tracking-tight">
             Hi, <span className="text-clay">{user?.name?.split(" ")[0]}</span>.
           </div>
-          <div className="text-sm text-forest/60 mt-1">Your current month's highlights · {period}</div>
+          <div className="text-sm text-forest/60 mt-1"><span data-testid="dash-month-period">Highlights for {period}</span></div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi testId={DASH.kpiNewLeads} label="New leads" value={data.kpi.new_leads} sub="This month · click to view" icon={Users2} onClick={() => nav("/leads?created=this_month")} />
-        <Kpi testId={DASH.kpiRevenue} label="Revenue" value={inr(data.kpi.revenue)} sub={`${data.revenue.change_pct >= 0 ? "↑" : "↓"} ${Math.abs(data.revenue.change_pct)}% vs last mo. · click to split`} icon={TrendingUp} tone={data.revenue.change_pct >= 0 ? "wheat" : "clay"} onClick={() => setRevOpen(true)} />
+        <Kpi testId={DASH.kpiNewLeads} label="New leads" value={data.kpi.new_leads} sub="In period · click to view" icon={Users2} onClick={() => nav("/leads?created=this_month")} />
+        <Kpi testId={DASH.kpiRevenue} label="Revenue" value={inr(data.kpi.revenue)} sub={`${data.revenue.change_pct >= 0 ? "↑" : "↓"} ${Math.abs(data.revenue.change_pct)}% vs prev. period · click to split`} icon={TrendingUp} tone={data.revenue.change_pct >= 0 ? "wheat" : "clay"} onClick={() => setRevOpen(true)} />
         <Kpi testId={DASH.kpiBooked} label="Booked" value={data.kpi.booked} sub="Deals closed · click to view" icon={CalendarCheck2} onClick={() => nav("/leads?stage=booked")} />
         <Kpi testId={DASH.kpiConversion} label="Conversion" value={`${data.kpi.conversion}%`} sub="Booked / New leads" icon={Sparkles} tone="wheat" onClick={() => nav("/leads?stage=booked")} />
       </div>
 
       <RevenueBreakdownDialog open={revOpen} onClose={() => setRevOpen(false)} />
 
+      {canTeam && <TeamCallReport range={range} />}
+
       {/* Telemetry + revenue comparison */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 border border-[#E6E4DD] bg-white rounded-sm p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <div className="label-caps">Team activity · last 4 months</div>
+              <div className="label-caps">Team activity · selected period</div>
               <h3 className="font-display font-bold text-2xl text-forest tracking-tight mt-1">Outreach telemetry</h3>
             </div>
           </div>
@@ -175,7 +180,7 @@ function MonthlyTab() {
         <div className="border border-[#E6E4DD] bg-white rounded-sm p-6 flex flex-col">
           <div className="label-caps">Revenue comparison</div>
           <div className="mt-6">
-            <div className="text-xs uppercase tracking-[0.18em] text-forest/50">Current month</div>
+            <div className="text-xs uppercase tracking-[0.18em] text-forest/50">Selected period</div>
             <div className="flex items-baseline gap-3 mt-1">
               <div className="font-display font-black text-5xl text-forest tracking-tight">{inr(data.revenue.current)}</div>
               <div className={`text-sm font-semibold ${data.revenue.change_pct >= 0 ? "text-[#2D6A4F]" : "text-clay"}`}>
@@ -184,7 +189,7 @@ function MonthlyTab() {
             </div>
           </div>
           <div className="mt-6 pt-6 border-t border-[#E6E4DD]">
-            <div className="text-xs uppercase tracking-[0.18em] text-forest/50">Last month</div>
+            <div className="text-xs uppercase tracking-[0.18em] text-forest/50">Previous period (same length)</div>
             <div className="font-display font-bold text-3xl text-forest/70 tracking-tight tabular-nums mt-1">{inr(data.revenue.previous)}</div>
           </div>
           <div className="mt-auto pt-6 text-xs text-forest/50">
@@ -276,15 +281,14 @@ function MonthlyTab() {
   );
 }
 
-function ActionItemsTab() {
+function ActionItemsTab({ range }) {
   const nav = useNavigate();
   const { user } = useAuth();
   const [data, setData] = useState(null);
-  useEffect(() => { api.get("/dashboard/action-items").then((r) => setData(r.data)); }, []);
+  useEffect(() => { setData(null); api.get("/dashboard/action-items", { params: { date_from: range.from, date_to: range.to } }).then((r) => setData(r.data)); }, [range.from, range.to]);
   if (!data) return <div className="text-forest/50 text-sm">Loading…</div>;
 
   const w = data.widgets;
-  const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
 
   return (
     <div className="space-y-6">
@@ -292,20 +296,20 @@ function ActionItemsTab() {
       {(user?.role === "admin" || user?.role === "manager") && <CallReportCard />}
       <div className="flex items-baseline gap-3">
         <div className="label-caps">Overview</div>
-        <div className="text-sm text-forest/60">· {today} · 12:00 AM – 11:59 PM</div>
+        <div data-testid="dash-actions-period" className="text-sm text-forest/60">· {prettyRange(range)}</div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi testId="dash-kpi-missed" label="Missed calls" value={w.missed_calls} sub="Today · click to review" icon={PhoneMissed} tone="clay" onClick={() => nav("/leads")} />
-        <Kpi testId="dash-kpi-followups" label="Today's follow-ups" value={w.todays_followups} sub="Scheduled today" icon={BellRing} onClick={() => nav("/follow-ups")} />
-        <Kpi testId="dash-kpi-scheduled-calls" label="Scheduled calls" value={w.scheduled_calls} sub="All time" icon={Phone} onClick={() => nav("/follow-ups")} />
+        <Kpi testId="dash-kpi-missed" label="Missed calls" value={w.missed_calls} sub="In period · click to review" icon={PhoneMissed} tone="clay" onClick={() => nav("/leads")} />
+        <Kpi testId="dash-kpi-followups" label="Follow-ups" value={w.todays_followups} sub="Due in period" icon={BellRing} onClick={() => nav("/follow-ups")} />
+        <Kpi testId="dash-kpi-scheduled-calls" label="Scheduled calls" value={w.scheduled_calls} sub="Due in period" icon={Phone} onClick={() => nav("/follow-ups")} />
         <Kpi testId="dash-kpi-tasks" label="Tasks" value={w.tasks} sub="Meetings / emails / WA" icon={ListTodo} tone="wheat" onClick={() => nav("/follow-ups")} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ListPanel
-          title="Today's follow-ups"
-          empty="No follow-ups today."
+          title="Follow-ups due"
+          empty="No follow-ups in this period."
           items={data.todays_followups.map((f) => ({
             id: f.id,
             leadId: f.lead_id,
@@ -316,7 +320,7 @@ function ActionItemsTab() {
         />
         <ListPanel
           title="Planned dates"
-          empty="No planned site visits this week."
+          empty="No site visits planned in this period."
           items={data.planned_visits.map((v) => ({
             id: v.id,
             leadId: v.lead_id,
@@ -326,6 +330,19 @@ function ActionItemsTab() {
           }))}
         />
       </div>
+
+      <ListPanel
+        title="To-do list"
+        testId="dash-todo-list"
+        empty="Nothing on the to-do list for this period."
+        items={(data.todo_list || []).map((t) => ({
+          id: t.id,
+          leadId: t.lead_id,
+          primary: new Date(t.due_at).toLocaleDateString([], { day: "2-digit", month: "short" }),
+          secondary: `${t.kind} · ${t.lead_name || "Lead"}${t.notes ? ` · ${t.notes}` : ""}`,
+          note: overdueLabel(t.due_at),
+        }))}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <LeadListPanel title="Leads with no calls done" items={data.no_call_leads} empty="Every lead has been called." />
@@ -347,9 +364,9 @@ function overdueLabel(iso) {
   return { text: `${h}h ${m}m Overdue`, tone: "clay" };
 }
 
-function ListPanel({ title, items, empty }) {
+function ListPanel({ title, items, empty, testId }) {
   return (
-    <div className="border border-[#E6E4DD] bg-white rounded-sm">
+    <div data-testid={testId} className="border border-[#E6E4DD] bg-white rounded-sm">
       <div className="px-5 py-3 border-b border-[#E6E4DD] flex items-center justify-between bg-bone-alt/40">
         <div className="font-display font-bold text-base text-forest tracking-tight">{title}</div>
         <div className="text-xs text-forest/50">{items.length}</div>
@@ -358,7 +375,7 @@ function ListPanel({ title, items, empty }) {
         {items.map((i) => (
           <Link to={`/leads/${i.leadId}`} key={i.id} className="flex items-center gap-3 px-5 py-3 hover:bg-bone-alt/30 transition-colors duration-100">
             <div className="w-20 shrink-0 text-sm font-display font-bold text-forest tabular-nums">{i.primary}</div>
-            <div className="flex-1 min-w-0 text-xs uppercase tracking-[0.15em] font-bold text-forest/60">{i.secondary}</div>
+            <div className="flex-1 min-w-0 text-xs uppercase tracking-[0.15em] font-bold text-forest/60 truncate">{i.secondary}</div>
             {i.note && (
               <div className={`text-xs ${i.note.tone === "clay" ? "text-clay font-medium" : "text-forest/50"}`}>{i.note.text}</div>
             )}
@@ -396,15 +413,17 @@ function LeadListPanel({ title, items, empty }) {
 
 export default function Dashboard() {
   const [tab, setTab] = useState("month");
+  const [range, setRange] = useState(initialDashRange);
   return (
     <div className="space-y-6">
+      <DashboardRangeBar value={range} onChange={setRange} />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="rounded-sm border border-[#E6E4DD] bg-white p-1 h-auto">
           <TabsTrigger data-testid={DASH.tabMonth} value="month" className="rounded-sm data-[state=active]:bg-forest data-[state=active]:text-white text-forest px-4 py-1.5 text-xs uppercase tracking-[0.18em] font-bold">Month's Updates</TabsTrigger>
           <TabsTrigger data-testid={DASH.tabActions} value="actions" className="rounded-sm data-[state=active]:bg-forest data-[state=active]:text-white text-forest px-4 py-1.5 text-xs uppercase tracking-[0.18em] font-bold">Action Items</TabsTrigger>
         </TabsList>
-        <TabsContent value="month" className="mt-6"><MonthlyTab /></TabsContent>
-        <TabsContent value="actions" className="mt-6"><ActionItemsTab /></TabsContent>
+        <TabsContent value="month" className="mt-6"><MonthlyTab range={range} /></TabsContent>
+        <TabsContent value="actions" className="mt-6"><ActionItemsTab range={range} /></TabsContent>
       </Tabs>
     </div>
   );

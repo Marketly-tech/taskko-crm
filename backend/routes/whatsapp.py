@@ -269,11 +269,15 @@ async def wa_webhook(org_slug: str, request: Request, secret: str = ""):
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid body")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid body")
     event = str(payload.get("event", "")).lower().replace("_", ".")
     if event not in ("messages.upsert", "send.message"):
         return {"accepted": True}
     items = payload.get("data")
     for d in (items if isinstance(items, list) else [items or {}]):
+        if not isinstance(d, dict):
+            continue
         key = d.get("key") or {}
         jid = key.get("remoteJid") or ""
         if not key.get("id") or not jid.endswith("@s.whatsapp.net"):
@@ -304,19 +308,32 @@ async def list_message_campaigns(user: dict = Depends(require_roles("admin", "ma
 
 @router.post("/message-campaigns")
 async def run_message_campaign(body: MessageCampaignBody, actor: dict = Depends(require_roles("admin", "manager"))):
-    from routes.eod import SENDER_EMAIL, resend
+    from routes.eod import resend
     if not body.name.strip() or not body.message.strip():
         raise HTTPException(status_code=400, detail="Campaign name and message are required")
     q: dict = {"id": {"$in": body.lead_ids}} if body.lead_ids else ({"stage": body.stage} if body.stage else None)
     if q is None:
         raise HTTPException(status_code=400, detail="Pick a stage or leads")
     leads = await db.leads.find(q, {"_id": 0}).to_list(1000)
-    sent = failed = skipped = 0
+    if not leads:
+        raise HTTPException(status_code=400, detail="No leads match this selection")
     cfg = await wa_cfg()
     if body.channel == "whatsapp" and not _configured(cfg):
         raise HTTPException(status_code=400, detail="Connect WhatsApp (Evolution API) before sending a WhatsApp campaign")
     if body.channel == "email" and not (resend and os.environ.get("RESEND_API_KEY")):
         raise HTTPException(status_code=400, detail="Email (Resend) is not configured")
+    doc = {"id": new_id(), "name": body.name.strip(), "channel": body.channel, "message": body.message, "stage": body.stage, "total": len(leads),
+           "sent": 0, "failed": 0, "skipped": 0, "errors": [], "status": "running", "created_by_name": actor.get("name"), "created_at": now_utc().isoformat()}
+    await db.message_campaigns.insert_one(doc)
+    doc.pop("_id", None)
+    asyncio.create_task(_deliver_campaign(doc["id"], body, leads, actor))
+    return doc
+
+
+async def _deliver_campaign(cid: str, body: MessageCampaignBody, leads: list, actor: dict) -> None:
+    from routes.eod import SENDER_EMAIL, resend  # noqa: F401
+    sent = failed = skipped = 0
+    errors: list = []
     for lead in leads:
         text = body.message.replace("{name}", lead.get("name") or "")
         try:
@@ -336,10 +353,11 @@ async def run_message_campaign(body: MessageCampaignBody, actor: dict = Depends(
                 await asyncio.to_thread(resend.Emails.send, {"from": SENDER_EMAIL, "to": [lead["email"]], "subject": body.subject or body.name, "html": f"<p>{text}</p>"})
                 await log_activity(lead["id"], actor, "email_sent", body.subject or body.name, {"campaign": body.name})
             sent += 1
-        except Exception:
+            if body.channel == "whatsapp":
+                await asyncio.sleep(1.5)
+        except Exception as e:
             failed += 1
-    doc = {"id": new_id(), "name": body.name.strip(), "channel": body.channel, "message": body.message, "stage": body.stage, "total": len(leads),
-           "sent": sent, "failed": failed, "skipped": skipped, "created_by_name": actor.get("name"), "created_at": now_utc().isoformat()}
-    await db.message_campaigns.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
+            if len(errors) < 20:
+                errors.append({"lead": lead.get("name"), "reason": getattr(e, "detail", None) or str(e)[:200]})
+        await db.message_campaigns.update_one({"id": cid}, {"$set": {"sent": sent, "failed": failed, "skipped": skipped, "errors": errors}})
+    await db.message_campaigns.update_one({"id": cid}, {"$set": {"status": "completed", "completed_at": now_utc().isoformat()}})

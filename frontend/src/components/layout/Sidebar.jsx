@@ -27,7 +27,7 @@ const GROUPS = [
       { to: "/site-visits", label: "Site Visits", icon: CalendarClock, testId: NAV.itemVisits },
       { to: "/follow-ups", label: "Follow-ups", icon: BellRing, testId: NAV.itemFollowups },
       { to: "/whatsapp", label: "WhatsApp Inbox", icon: MessageCircle, testId: "nav-whatsapp" },
-      { to: "/callerdesk", label: "CallerDesk", icon: PhoneCall, testId: "nav-callerdesk", role: ["admin", "manager"] },
+      { to: "/callerdesk", label: "Business Campaign", icon: PhoneCall, testId: "nav-callerdesk", role: ["admin", "manager"] },
     ],
   },
   {
@@ -73,9 +73,9 @@ export default function Sidebar() {
     >
       <div className="relative z-10 px-6 pt-8 pb-6">
         <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-sm bg-wheat text-forest grid place-items-center font-display font-black">T</div>
+          <div className="h-8 w-8 rounded-sm bg-wheat text-forest grid place-items-center font-display font-black">P</div>
           <div>
-            <div className="font-display font-black text-xl tracking-tight leading-none">Tasko</div>
+            <div className="font-display font-black text-xl tracking-tight leading-none">Propzel</div>
             <div className="text-[10px] uppercase tracking-[0.22em] text-white/50 mt-1">Real Estate CRM</div>
           </div>
         </div>
@@ -130,7 +130,7 @@ export default function Sidebar() {
             data-testid={AUTH.logoutBtn}
             onClick={logout}
             className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-sm text-white/70 hover:text-white hover:bg-white/10 text-[10px] uppercase tracking-[0.18em] font-bold transition-colors duration-150"
-            title="Sign out of Tasko"
+            title="Sign out of Propzel"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span>Sign out</span>

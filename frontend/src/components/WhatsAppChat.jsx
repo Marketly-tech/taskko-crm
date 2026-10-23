@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, formatApiError, relTime } from "@/lib/api";
-import { Send, ImagePlus, RefreshCcw, X, CheckCheck } from "lucide-react";
+import { Send, ImagePlus, RefreshCcw, X, CheckCheck, FileText } from "lucide-react";
 import { toast } from "sonner";
 
 const toBase64 = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
@@ -17,8 +17,46 @@ const Bubble = ({ m }) => (
   </div>
 );
 
+const fillTemplate = (body, leadName) => (body || "").replace(/\{\{?\s*(name|lead_name|1)\s*\}?\}/gi, leadName || "there");
+
+const TemplatePicker = ({ leadName, onPick, testId }) => {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState(null);
+  const [q, setQ] = useState("");
+  const toggle = async () => {
+    setOpen(!open);
+    if (!items) {
+      try { const { data } = await api.get("/whatsapp-templates"); setItems(data); } catch (e) { setItems([]); toast.error(formatApiError(e.response?.data?.detail)); }
+    }
+  };
+  const list = (items || []).filter((t) => !q || `${t.name} ${t.body}`.toLowerCase().includes(q.toLowerCase()));
+  return (
+    <div className="relative">
+      <button data-testid={`${testId}-templates`} onClick={toggle} title="Insert template" className={`h-9 w-9 grid place-items-center rounded-sm transition-colors duration-150 ${open ? "bg-bone-alt text-forest" : "text-forest/60 hover:text-forest hover:bg-bone-alt"}`}><FileText className="h-4 w-4" /></button>
+      {open && (
+        <div data-testid={`${testId}-template-list`} className="absolute bottom-11 left-0 z-20 w-80 max-h-80 flex flex-col bg-white border border-[#E6E4DD] rounded-sm shadow-lg">
+          <div className="p-2 border-b border-[#E6E4DD] flex items-center gap-2">
+            <input data-testid={`${testId}-template-search`} autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search templates" className="flex-1 text-sm outline-none" />
+            <button onClick={() => setOpen(false)} className="text-forest/50 hover:text-forest"><X className="h-3.5 w-3.5" /></button>
+          </div>
+          <div className="overflow-y-auto divide-y divide-[#E6E4DD]">
+            {items === null && <div className="p-4 text-xs text-forest/50">Loading…</div>}
+            {items && list.length === 0 && <div className="p-4 text-xs text-forest/50">No templates yet — add them in WhatsApp Templates.</div>}
+            {list.map((t) => (
+              <button key={t.id} data-testid={`${testId}-template-${t.id}`} onClick={() => { onPick(fillTemplate(t.body, leadName)); setOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-bone-alt/50 transition-colors duration-150">
+                <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium text-forest truncate">{t.name}</span><span className="text-[9px] uppercase tracking-[0.15em] text-forest/45">{t.category}</span></div>
+                <div className="text-xs text-forest/60 line-clamp-2 mt-0.5">{fillTemplate(t.body, leadName)}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // basePath: "/leads/<id>/whatsapp" or "/whatsapp/conversations/<id>"
-export const WhatsAppChat = ({ fetchPath, sendPath, syncPath, height = "h-[420px]", testId = "wa-chat" }) => {
+export const WhatsAppChat = ({ fetchPath, sendPath, syncPath, leadName, height = "h-[420px]", testId = "wa-chat" }) => {
   const [msgs, setMsgs] = useState([]);
   const [configured, setConfigured] = useState(true);
   const [text, setText] = useState("");
@@ -55,7 +93,7 @@ export const WhatsAppChat = ({ fetchPath, sendPath, syncPath, height = "h-[420px
   return (
     <div data-testid={testId} className="flex flex-col border border-[#E6E4DD] rounded-sm overflow-hidden bg-[#F4F1EA]">
       {!configured && <div data-testid="wa-not-configured" className="px-3 py-2 text-xs bg-clay/10 text-forest border-b border-clay/30">WhatsApp isn't connected yet — incoming messages appear here once an admin connects Evolution API in WhatsApp Inbox → Settings.</div>}
-      <div className={`flex-1 overflow-y-auto p-3 space-y-2 ${height}`}>
+      <div className={`overflow-y-auto p-3 space-y-2 ${height}`}>
         {msgs.length === 0 && <div className="text-center text-sm text-forest/50 pt-10">No WhatsApp messages yet.</div>}
         {msgs.map((m) => <Bubble key={m.id} m={m} />)}
         <div ref={endRef} />
@@ -64,6 +102,7 @@ export const WhatsAppChat = ({ fetchPath, sendPath, syncPath, height = "h-[420px
       <div className="flex items-end gap-2 p-2 bg-white border-t border-[#E6E4DD]">
         {syncPath && <button data-testid={`${testId}-sync`} onClick={sync} title="Sync history" className="h-9 w-9 grid place-items-center rounded-sm text-forest/60 hover:text-forest hover:bg-bone-alt transition-colors duration-150"><RefreshCcw className="h-4 w-4" /></button>}
         <button data-testid={`${testId}-attach`} onClick={() => fileRef.current?.click()} title="Attach image" className="h-9 w-9 grid place-items-center rounded-sm text-forest/60 hover:text-forest hover:bg-bone-alt transition-colors duration-150"><ImagePlus className="h-4 w-4" /></button>
+        <TemplatePicker leadName={leadName} testId={testId} onPick={setText} />
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
         <textarea data-testid={`${testId}-input`} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} rows={1} placeholder="Type a WhatsApp message" className="flex-1 resize-none min-h-9 max-h-28 border border-[#E6E4DD] rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-forest" />
         <button data-testid={`${testId}-send`} disabled={busy} onClick={send} className="h-9 px-3 rounded-sm bg-[#128C7E] text-white text-sm inline-flex items-center gap-1.5 hover:bg-[#0f7a6e] disabled:opacity-60 transition-colors duration-150"><Send className="h-4 w-4" /> Send</button>

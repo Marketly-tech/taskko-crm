@@ -1,38 +1,40 @@
 # Tasko Real Estate CRM — PRD
 
 ## Original problem statement
-Build "Tasko", a Paramantra-inspired real estate CRM with lead capture from external portals (MagicBricks, CommonFloor, Google Ads, Meta), auto/manual assignment, role-based access (Admin, Manager, Executive), sales funnel, WhatsApp + Email (Resend), auto follow-ups, project inventory management, site visit management, notifications, Admin EOD summary + email report.
+Build "Tasko", a Paramantra-inspired real estate CRM with lead capture from external portals (MagicBricks, CommonFloor, Google Ads, Meta), auto/manual assignment, role-based access, sales funnel, WhatsApp + Email (Resend), auto follow-ups, inventory, site visits, notifications, Admin EOD summary + email.
+Later request: merge features from the offline repos (CretiveMarketly/taskko-crm-server, PrinceJoshwa/taskko-crm-client): CallerDesk, WhatsApp via Evolution API, number masking, Super Admin (multi-organisation), co-owners, revised lead stages, site-visit calendar, advanced reports.
 
-## Core requirements
-- React + FastAPI + MongoDB
-- JWT (cookie) auth, RBAC (admin/manager/executive)
-- Lead webhooks (public) for aggregator portals
-- Twilio click-to-call with recordings
-- Resend email
-- APScheduler (daily 18:00 IST EOD email)
+## User choices (Jun 2026)
+- Phased rollout, backend cleanup first.
+- Super Admin runs multiple separate organisations and switches between them.
+- Phone numbers masked for **Executives AND Managers** (admins + super admin see full).
+- CallerDesk / Evolution keys added by the user later (secure card).
+- Switch to repo stage list (adds 4 DNP stages); existing leads already matched.
 
-## Implemented so far
-- **Iteration 1–4** (prior sessions): Auth+RBAC, Leads (Kanban+List+CRUD+CSV), Projects+Inventory (CSV import/export), Site Visits, Follow-ups, WhatsApp templates, Channel Partners, Proposals, Reports, Dashboard (Month's Updates + Action Items + revenue drill-down), Twilio Voice (executive-first bridged calling + recording + missed-call auto-followup).
-- **Iteration 5 (this session)**:
-  - In-app notifications collection + endpoints (`GET /api/notifications`, `POST /api/notifications/{id}/read`, `POST /api/notifications/read-all`, `POST /api/notifications/refresh`).
-  - Role-scoped notifications: agents get personal (lead_assigned, followup_due, sitevisit_reminder, missed_call); managers get team aggregates (team_overdue, stale_lead, negotiation_pending, exec_no_activity); admins inherit manager scope.
-  - Notification bell in Topbar with unread badge, dropdown, mark-all.
-  - Admin EOD summary card in Dashboard's Action Items tab + auto-modal after 18:00 local (per browser).
-  - EOD email via Resend HTML template + APScheduler cron (18:00 IST daily).
-  - Manual "Send now" button on EOD card + `/api/admin/eod-email/send` endpoint.
+## Architecture
+- Backend: FastAPI. `core.py` (config, ScopedDB auto-scoping every tenant collection by active org via contextvar `org_ctx`, auth, masking helpers, models) + `routes/*.py` (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp). `server.py` = app, seed, scheduler. Use `raw_db` only for cross-org/auth lookups.
+- Super Admin: role `super_admin`, no organization_id; frontend sends `X-Organization-Id` (localStorage `tasko-org-id`); AuthContext normalises super_admin to role admin + `is_super_admin`.
+- Public webhooks pick org by `?org=<slug>` (leads, CallerDesk) or path slug + secret (WhatsApp).
+- Scheduler jobs wrapped by `for_each_org` (EOD email, notif refresh, CallerDesk campaign tick every minute).
 
-## Prioritized backlog (P0/P1/P2)
-- P2 · Auto-Dialer (parked)
-- P2 · Knowledge base, marketing tools, zone/regions, geolocation dashboard
-- P1 · Verify Resend domain (currently testing mode — sends to non-verified admin emails return in errors[])
-- P1 · Twilio production keys / lift-off
-- P2 · WhatsApp Business API integration (currently template-only)
-- P2 · Google Calendar sync for site visits (toggle exists, real integration pending)
+## Implemented
+- Iterations 1–7: Auth+RBAC, Leads Kanban/List, Projects/Inventory, Site visits, Follow-ups, WA templates, Partners, Proposals, Reports, Dashboard, Twilio click-to-call+recording, notifications, EOD email (Resend + APScheduler).
+- Iteration 8 (Phase 1+2): backend split into modules; multi-org + Super Admin control panel (/super-admin, org create/enable, audit log, org switcher); co-owners (`co_assigned_to`, owner_mode filter, tags, picker, notifications); DNP stages; phone masking (leads, dashboard, activities, users, reports, WhatsApp, CallerDesk logs).
+- Iteration 9 (Phase 3+4): Reports page with global date range + presets, source performance, outreach telemetry (daily), activity by user, pipeline status by owner, lost-with-reason (+reason chips), exec scorecard, call drill-down, CSV export; Site-visit calendar view. CallerDesk: dashboard, dialer, campaign dialer (start/pause/cancel, per-minute batching), call logs, settings (provider toggle Twilio/CallerDesk, per-org keys), webhook, call report card on Overview.
+- Iteration 10 (Phase 5): WhatsApp via Evolution API — lead WhatsApp section (text, image, sync), WhatsApp Inbox (/whatsapp) with conversations, settings + QR, webhook (messages.upsert), message campaigns (WhatsApp/Email, background delivery with throttle) in CallerDesk.
 
-## Notes / gotchas
-- Resend testing-mode requires `SENDER_EMAIL` to be an address on a verified domain; otherwise the API rejects non-verified recipients. Update `/app/backend/.env` when domain is verified.
-- Scheduler is registered in FastAPI startup — restart backend to reload cron.
-- EOD modal uses localStorage `tasko-eod-shown-YYYY-MM-DD` to gate once per day.
+## Status of integrations
+- Twilio: live keys set (default calling provider).
+- Resend: key set (testing mode – unverified domain).
+- CallerDesk: **keys pending** — calls log as `pending_credentials` (mocked). Needs CALLERDESK_AUTHCODE, CALLERDESK_VIRTUAL_NUMBER (+ optional CALLERDESK_WEBHOOK_SECRET); then toggle provider in CallerDesk → Settings.
+- Evolution API: **keys pending** — sends return 400 "not connected". Needs EVOLUTION_API_URL, EVOLUTION_API_KEY, EVOLUTION_INSTANCE_NAME; then set the webhook URL shown in Inbox → Settings in Evolution.
+
+## Backlog
+- P1 · Verify with real CallerDesk / Evolution keys once provided (webhooks need public BACKEND_PUBLIC_URL).
+- P1 · Executive report scope should include co-owned leads.
+- P2 · Auto-dialer (predictive), Knowledge base, marketing tools, zones/regions.
+- P2 · Store received WhatsApp media in object storage.
+- P2 · Mobile-responsive sidebar.
 
 ## Test credentials
 See `/app/memory/test_credentials.md`.

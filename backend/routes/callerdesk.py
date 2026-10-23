@@ -18,6 +18,9 @@ class CampaignBody(BaseDoc):
     name: str
     lead_ids: Optional[List[str]] = None
     numbers: Optional[List[str]] = None
+    stages: Optional[List[str]] = None
+    skip_called_today: Optional[bool] = True
+    auto_start: Optional[bool] = True
     calls_per_minute: Optional[int] = 3
 
 
@@ -243,24 +246,60 @@ async def list_campaigns(status: Optional[str] = None, search: Optional[str] = N
     return {"items": items}
 
 
+async def stage_leads(stages: List[str], skip_called_today: bool) -> tuple:
+    """Leads currently in the given stages that have a phone; optionally drop ones already called today."""
+    bad = [s for s in stages if s not in ALL_STAGES]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"Unknown stage: {', '.join(bad)}")
+    leads = await db.leads.find({"stage": {"$in": stages}, "phone": {"$nin": [None, ""]}}, {"_id": 0}).to_list(5000)
+    skipped = 0
+    if skip_called_today and leads:
+        now = now_utc()
+        day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc).isoformat()
+        called = set(await db.activities.distinct("lead_id", {"lead_id": {"$in": [x["id"] for x in leads]}, "created_at": {"$gte": day},
+                                                             "kind": {"$in": ["outgoing_call", "call", "incoming_call", "missed_call"]}}))
+        skipped = sum(1 for x in leads if x["id"] in called)
+        leads = [x for x in leads if x["id"] not in called]
+    return leads, skipped
+
+
+@router.get("/callerdesk/campaigns/stage-preview")
+async def campaign_stage_preview(stages: str = "", skip_called_today: bool = True, user: dict = Depends(require_roles("admin", "manager"))):
+    sel = [s for s in stages.split(",") if s]
+    if not sel:
+        return {"count": 0, "skipped": 0}
+    leads, skipped = await stage_leads(sel, skip_called_today)
+    return {"count": len(leads), "skipped": skipped}
+
+
 @router.post("/callerdesk/campaigns")
 async def create_campaign(body: CampaignBody, actor: dict = Depends(require_roles("admin", "manager"))):
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="Campaign name is required")
     ids = list(dict.fromkeys(body.lead_ids or []))
     leads = await db.leads.find({"id": {"$in": ids}}, {"_id": 0}).to_list(len(ids) or 1) if ids else []
+    skipped = 0
+    if body.stages:
+        staged, skipped = await stage_leads(body.stages, bool(body.skip_called_today))
+        leads += [x for x in staged if x["id"] not in set(ids)]
     by_phone = {digits(x.get("phone")): x for x in leads if x.get("phone")}
     numbers = list(dict.fromkeys([digits(n) for n in (body.numbers or []) if len(digits(n)) >= 8] + list(by_phone)))
     if not numbers:
-        raise HTTPException(status_code=400, detail="Add at least one lead with a phone number or a valid number")
+        raise HTTPException(status_code=400, detail="No leads to dial — pick a stage with leads that have phone numbers, or add numbers")
     now = now_utc().isoformat()
     camp = {"id": new_id(), "name": body.name.strip(), "status": "draft", "calls_per_minute": max(1, min(int(body.calls_per_minute or 3), 20)),
+            "stages": body.stages or [], "skip_called_today": bool(body.skip_called_today), "skipped_called_today": skipped,
             "created_by": actor["id"], "created_by_name": actor.get("name"), "created_at": now, "updated_at": now}
     await db.callerdesk_campaigns.insert_one(camp)
     await db.callerdesk_campaign_numbers.insert_many([{
         "id": new_id(), "campaign_id": camp["id"], "lead_id": (by_phone.get(n) or {}).get("id"), "lead_name": (by_phone.get(n) or {}).get("name"),
         "phone": n, "status": "pending", "attempts": 0, "duration_sec": 0, "call_sid": None, "created_at": now, "updated_at": now} for n in numbers])
     camp.pop("_id", None)
+    camp["total_numbers"] = len(numbers)
+    if body.auto_start:
+        await db.callerdesk_campaigns.update_one({"id": camp["id"]}, {"$set": {"status": "active", "started_by": actor["id"]}})
+        camp["run"] = await run_campaign_batch(camp["id"], actor)
+        camp["status"] = camp["run"]["status"]
     return camp
 
 
@@ -300,8 +339,6 @@ async def run_campaign_batch(cid: str, actor: dict) -> dict:
 
 @router.post("/callerdesk/campaigns/{cid}/start")
 async def start_campaign(cid: str, actor: dict = Depends(require_roles("admin", "manager"))):
-    if (await cd_settings())["calling_provider"] != "callerdesk":
-        raise HTTPException(status_code=400, detail="Turn on CallerDesk calling in CallerDesk Settings before starting a campaign")
     await db.callerdesk_campaigns.update_one({"id": cid}, {"$set": {"status": "active", "started_by": actor["id"], "updated_at": now_utc().isoformat()}})
     return await run_campaign_batch(cid, actor)
 
@@ -333,8 +370,6 @@ async def campaign_calls(cid: str, status: Optional[str] = None, search: Optiona
 
 async def campaign_tick() -> None:
     """Scheduler job: dial the next batch of every active campaign."""
-    if (await cd_settings())["calling_provider"] != "callerdesk":
-        return
     async for c in db.callerdesk_campaigns.find({"status": "active"}, {"_id": 0}):
         actor = await db.users.find_one({"id": c.get("started_by") or c.get("created_by")}, {"_id": 0, "password_hash": 0})
         if actor:
@@ -372,7 +407,7 @@ async def callerdesk_webhook(request: Request, org: Optional[str] = None):
     if not lead and direction == "incoming" and digits(p_from, True):
         lead = await db.leads.find_one({"phone": {"$regex": f"{digits(p_from, True)}$"}}, {"_id": 0})
         if not lead:
-            lead = {"id": new_id(), "name": f"Inbound caller {digits(p_from, True)}", "phone": digits(p_from, True), "source": "manual", "stage": "new",
+            lead = {"id": new_id(), "name": f"Inbound caller {mask_phone(p_from)}", "phone": digits(p_from, True), "source": "manual", "stage": "new",
                     "priority": "warm", "assigned_to": await _pick_auto_assignee(), "co_assigned_to": [], "created_at": now_utc().isoformat(), "updated_at": now_utc().isoformat()}
             await db.leads.insert_one(lead)
             lead.pop("_id", None)

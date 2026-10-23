@@ -81,7 +81,7 @@ export default function WhatsAppInbox() {
           <div className="space-y-2">
             <div className="flex items-center justify-between"><div><div className="font-display font-bold text-lg text-forest">{active.lead_name || active.number}</div><div className="text-xs text-forest/50 tabular-nums">{active.number}</div></div>
               {active.lead_id && <Link data-testid="wa-open-lead" to={`/leads/${active.lead_id}`} className="text-xs text-clay hover:text-forest">Open lead →</Link>}</div>
-            <WhatsAppChat fetchPath={`/whatsapp/conversations/${active.id}/messages`} sendPath={`/whatsapp/conversations/${active.id}/messages`} height="h-[480px]" testId="wa-inbox-chat" />
+            <WhatsAppChat fetchPath={`/whatsapp/conversations/${active.id}/messages`} sendPath={`/whatsapp/conversations/${active.id}/messages`} leadName={active.lead_name} height="h-[480px]" testId="wa-inbox-chat" />
           </div>
         ) : (
           <div className="border border-dashed border-[#E6E4DD] rounded-sm grid place-items-center text-forest/50 text-sm min-h-[400px]"><div className="text-center"><MessageCircle className="h-6 w-6 mx-auto mb-2 opacity-60" />Pick a conversation</div></div>

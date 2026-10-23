@@ -213,6 +213,7 @@ async def delete_lead(lead_id: str, actor: dict = Depends(require_roles("admin")
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
     await db.activities.delete_many({"lead_id": lead_id})
+    await db.wa_chats.update_many({"lead_id": lead_id}, {"$set": {"lead_id": None}})
     return {"ok": True}
 
 

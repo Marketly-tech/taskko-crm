@@ -27,7 +27,7 @@ code, kbd, pre {
 
 @layer base {
   :root {
-    /* light theme mapped to Tasko palette */
+    /* light theme mapped to Propzel palette */
     --background: 44 20% 97%;
     --foreground: 150 12% 13%;
     --card: 0 0% 100%;

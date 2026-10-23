@@ -29,13 +29,13 @@ const TITLES = {
   "/partners": "Channel Partners",
   "/proposals": "Proposals",
   "/super-admin": "Super Admin",
-  "/callerdesk": "CallerDesk",
+  "/callerdesk": "Business Campaign",
 };
 
 export default function Topbar() {
   const { projects, activeId, setActive } = useProjects();
   const { pathname } = useLocation();
-  const title = TITLES[pathname] || (pathname.startsWith("/leads/") ? "Lead" : pathname.startsWith("/callerdesk") ? "CallerDesk" : pathname.startsWith("/whatsapp") ? "WhatsApp Inbox" : "Tasko");
+  const title = TITLES[pathname] || (pathname.startsWith("/leads/") ? "Lead" : pathname.startsWith("/callerdesk") ? "Business Campaign" : pathname.startsWith("/whatsapp") ? "WhatsApp Inbox" : "Propzel");
   // Project switcher only appears on pages where it actually filters data.
   const SHOW_ON = new Set(["/projects", "/inventory", "/site-visits", "/follow-ups"]);
   const showSwitcher = SHOW_ON.has(pathname);
@@ -47,7 +47,7 @@ export default function Topbar() {
     >
       <div className="flex items-center gap-6 h-16 px-8">
         <div className="flex-1 min-w-0">
-          <div className="text-[10px] uppercase tracking-[0.22em] text-forest/50">Tasko / Workspace</div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-forest/50">Propzel / Workspace</div>
           <h1 className="font-display font-bold text-xl text-forest tracking-tight leading-none mt-1">
             {title}
           </h1>

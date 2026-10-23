@@ -36,7 +36,7 @@ export default function ChannelPartners() {
         <div>
           <div className="label-caps">Console</div>
           <h2 className="font-display font-black text-3xl text-forest tracking-tight mt-1">Channel partners</h2>
-          <div className="text-sm text-forest/60 mt-1">Brokers, agencies and referrers sourcing leads into Tasko.</div>
+          <div className="text-sm text-forest/60 mt-1">Brokers, agencies and referrers sourcing leads into Propzel.</div>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>

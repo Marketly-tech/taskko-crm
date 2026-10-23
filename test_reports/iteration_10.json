@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 10 - Phase 5 WhatsApp (Evolution API, not configured) + message campaigns + iteration-9 fix verification. Backend: new suite backend_test_v10_whatsapp.py 30/31 pass; regression v8+v9 100/100 pass (v9 already handled campaign start under callerdesk provider). Verified: /whatsapp/status (admin webhook_url https://.../webhook/tasko?secret=..., configured=false; manager/exec webhook_url null), PATCH settings manager 403, qrcode 400 'not connected'; webhook wrong secret 401, unknown org 404, invalid JSON 400, connection.update ignored, messages.upsert stored once (dedupe on resend), appears in lead messages + conversations (lead_name/last_text/unread/opaque id), 'New WhatsApp message' notification for owner, imageMessage -> type image + caption, skyline webhook isolated (own secret, tasko secret 401 on skyline, no cross-org data). Masking: manager/exec number masked (e.g. 98XXXXXX12), remote_jid absent in messages + conversations; admin full. Exec scope: only own chats, other exec's chat messages GET/POST 403, other's lead whatsapp 403; unknown chat 404; search works. Send/sync -> 400 not connected, empty body 400, /whatsapp/sync exec 403. Message campaigns: list admin/manager 200, exec 403; whatsapp -> 400 'Connect WhatsApp'; no stage/lead_ids 400; bad channel 422; email via Resend returns {total:2,sent:0,failed:2,skipped:0} (Resend test mode) and doc listed. Iter-9 fixes: campaign start under twilio 400, CallerDesk webhook invalid JSON 400 and talk_duration 'abc' -> 200, reports exclude pending_credentials (code verified). Frontend (Playwright 1920): nav-whatsapp -> /whatsapp, search, chat click -> /whatsapp/<chatId>, bubbles, input/send/attach, send -> error toast, wa-open-lead navigates; admin settings panel all testids, state 'not connected', webhook url shown, QR -> error toast; manager no settings toggle, chat header number masked; lead detail section/chat/sync/attach/input/send + wa-not-configured banner, lead-whatsapp-btn scrolls (admin+manager), sync/send toasts; CallerDesk Message Campaigns tab all testids, subject only for email, WA campaign -> error toast, list renders. Executive /callerdesk and /callerdesk/message-campaigns -> '/', no toasts; manager /callerdesk/settings -> /callerdesk/dashboard; report-user hidden for exec; calendar-day testids match local dates.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/whatsapp/webhook/{org}", "issue": "Returns 500 when JSON body is not an object (e.g. a list) - AttributeError 'list' has no attribute 'get' at whatsapp.py:272. Also data items that are not dicts would 500. Add isinstance(payload, dict) check -> 400."},
+      {"endpoint": "wa_chats (store_message)", "issue": "Chats keep stale lead_id/lead_name after the lead is deleted; 'Open lead' then 404s. Also executive scoping relies on chat.lead_id set at last message time; chats received before lead creation are only linked on the next message."},
+      {"endpoint": "POST /api/callerdesk/webhook (lead naming)", "issue": "Auto-created leads are named 'Inbound caller <full 10-digit phone>' - the full number leaks to masked roles (manager/exec) via lead name everywhere (WhatsApp inbox list/header, leads list). Use a masked/neutral name."},
+      {"endpoint": "POST /api/message-campaigns", "issue": "Failure reasons swallowed (bare except -> failed++); no per-recipient error stored, so admin can't see why 2/2 failed. Sends are synchronous in-request for up to 1000 leads (timeout risk); no throttle for WhatsApp bulk (ban risk). Unknown stage silently creates a 0-total campaign."},
+      {"endpoint": "GET /api/whatsapp/conversations/{id}/messages", "issue": "Returns array without 'configured' flag, so the Inbox chat never shows the wa-not-configured banner (only lead chat does)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "WhatsAppChat message pane", "issue": "Pane uses 'flex-1 overflow-y-auto h-[...]' inside an auto-height flex-col: flex-basis 0 overrides the fixed height, so pane collapses to content (measured 92px instead of 480px in Inbox; ~80px vs 320px in lead). With long conversations it will grow unbounded with no inner scroll. Fix: drop flex-1 (or add shrink-0 / set height on outer container).", "selector": "[data-testid='wa-inbox-chat'] .overflow-y-auto", "priority": "MEDIUM"},
+      {"component": "LeadDetail load", "issue": "Opening a deleted lead (e.g. via stale WhatsApp chat 'Open lead') throws uncaught AxiosError 404 (Promise.all in load() at LeadDetail.jsx:282 has no try/catch) -> runtime error overlay / blank page. Add catch + 'Lead not found' state.", "selector": "[data-testid='wa-open-lead']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CallerDesk Message Campaigns", "issues": ["mc-channel/mc-stage are native <select> elements (inconsistent with shadcn Select used elsewhere)", "Stage options show raw lowercase values (site_visit -> 'site visit' lowercase)"]},
+      {"screen": "WhatsApp Inbox", "issues": ["Empty chat pane looks squashed (see pane height bug)"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v10_whatsapp.py", "/app/backend/tests/backend_test_v9_reports_callerdesk.py", "/app/backend/tests/backend_test_v8_multiorg.py", "/app/test_reports/pytest/pytest_v10.xml"],
+  "action_items": [
+    "WhatsApp webhook: reject non-dict JSON payload / non-dict data items with 400 instead of 500",
+    "Fix WhatsAppChat pane height (remove flex-1 so fixed h-[..] applies and inner scroll works)",
+    "LeadDetail: catch 404 on load and show not-found state",
+    "Unlink/clean wa_chats lead_id when a lead is deleted (or verify lead exists in conversations list)",
+    "Don't embed full phone in auto-created 'Inbound caller <phone>' lead names (masking leak)",
+    "Message campaigns: record failure reason, consider background job + throttling"
+  ],
+  "critical_code_review_comments": [
+    "whatsapp.py store_message lead match uses regex on last 10 digits of stored phone - fails if lead phone stored with spaces/dashes ('+91 98765 43210'); normalize phone digits on save or store phone_digits field",
+    "whatsapp.py webhook notification uses type='lead_assigned' for WhatsApp messages - use a dedicated type",
+    "wa_cfg() creates and persists webhook secret lazily on any read incl. unauthenticated webhook path - fine but no rotate endpoint",
+    "_send for campaigns calls store_message + log_activity per lead sequentially; 1000 leads in a single HTTP request will time out behind ingress",
+    "Inbox WhatsAppChat polls every 15s and chat list every 20s per tab - acceptable but no backoff on errors (toast spam on repeated failures)"
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v10_whatsapp.py"],
+  "success_rate": {"backend": "97% (30/31 new; 100/100 regression)", "frontend": "~92% (all requested flows/testids work; chat pane height + LeadDetail 404 crash)"},
+  "seed_data_creation": "TEST_WA_priya/TEST_WA_karan leads created and deleted per run (their wa_chats/wa_messages with TEST_ ids remain with stale lead_id); TEST_MC_email message_campaign docs (2); skyline wa message TEST_SKY_*; callerdesk_calls TEST_DUR_* row on lead 'Inbound caller 9000011111'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest -n 0 /app/backend/tests/backend_test_v10_whatsapp.py backend_test_v8_multiorg.py backend_test_v9_reports_callerdesk.py. Webhook secret comes from admin GET /api/whatsapp/status webhook_url. Login testids: auth-login-email/password/submit. The only seeded real WA chat is 'Inbound caller 9000011111' (MSG1); stale TEST_WA_* chats appear at top of inbox list. calling_provider left as twilio.",
+  "rca of the issue": "Webhook 500: payload.get() at whatsapp.py:272 assumes dict. Pane collapse: WhatsAppChat.jsx line 58 'flex-1 ... ${height}' inside flex-col without fixed height -> flex-basis:0 wins over height. LeadDetail crash: load() Promise.all without try/catch. Stale chat: store_message only updates wa_chats on new message; lead delete doesn't touch wa_chats."
+}

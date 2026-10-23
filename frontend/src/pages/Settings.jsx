@@ -94,7 +94,7 @@ export default function Settings() {
         {s.email_enabled && (
           <div className="pl-11">
             <div className="label-caps mb-1.5">From address</div>
-            <input value={s.resend_from_email || ""} onChange={(e) => set("resend_from_email", e.target.value)} placeholder="sales@tasko.com" className="w-full max-w-md h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
+            <input value={s.resend_from_email || ""} onChange={(e) => set("resend_from_email", e.target.value)} placeholder="sales@propzel.com" className="w-full max-w-md h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest" />
           </div>
         )}
 
@@ -154,7 +154,7 @@ export default function Settings() {
           <Row
             icon={Zap}
             title="Auto follow-up on missed / no-answer calls"
-            hint="If Twilio reports the lead didn't pick up, Tasko creates a follow-up task on the executive's list automatically."
+            hint="If Twilio reports the lead didn't pick up, Propzel creates a follow-up task on the executive's list automatically."
             testId="settings-toggle-missed-followup"
             checked={!!s.missed_call_followup_enabled}
             onChange={(v) => set("missed_call_followup_enabled", v)}
@@ -187,33 +187,6 @@ export default function Settings() {
             Set <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, <code>TWILIO_FROM_NUMBER</code> and <code>BACKEND_PUBLIC_URL</code> in the backend .env to enable live calling.
           </div>
         )}
-      </section>
-
-      <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <PhoneCall className="h-4 w-4 mt-1 text-forest/60" />
-          <div>
-            <div className="font-display font-bold text-xl text-forest tracking-tight">Calling & recording providers</div>
-            <div className="text-xs text-forest/60 mt-1">
-              Tasko is wired to <b>Twilio Voice REST</b> today. These alternatives can slot in when you outgrow Twilio in India:
-            </div>
-          </div>
-        </div>
-        <div className="grid md:grid-cols-3 gap-3">
-          {[
-            { name: "Twilio Voice", tag: "Active", url: "https://twilio.com/voice", active: true },
-            { name: "Exotel", tag: "India · alternative", url: "https://exotel.com" },
-            { name: "MyOperator", tag: "India · alternative", url: "https://myoperator.com" },
-          ].map((p) => (
-            <a key={p.name} href={p.url} target="_blank" rel="noreferrer" className={`border rounded-sm p-4 transition-colors duration-150 ${p.active ? "border-forest bg-forest/5" : "border-[#E6E4DD] hover:border-forest"}`}>
-              <div className="flex items-center gap-2">
-                <div className="font-display font-bold text-forest">{p.name}</div>
-                {p.active && <span className="text-[9px] uppercase tracking-[0.15em] font-bold text-[#2D6A4F]">Active</span>}
-              </div>
-              <div className="text-[10px] uppercase tracking-[0.15em] text-forest/50 mt-1">{p.tag}</div>
-            </a>
-          ))}
-        </div>
       </section>
 
       <section className="border border-[#E6E4DD] bg-white rounded-sm p-6">

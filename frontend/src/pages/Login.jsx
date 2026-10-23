@@ -27,10 +27,10 @@ export default function Login() {
       <div className="relative hidden md:flex flex-col justify-between p-12 bg-forest text-white grain overflow-hidden">
         <div className="relative z-10 flex items-center gap-3">
           <div className="h-9 w-9 rounded-sm bg-wheat text-forest grid place-items-center font-display font-black">
-            T
+            P
           </div>
           <div>
-            <div className="font-display font-black text-2xl tracking-tight leading-none">Tasko</div>
+            <div className="font-display font-black text-2xl tracking-tight leading-none">Propzel</div>
             <div className="text-[10px] uppercase tracking-[0.22em] text-white/60 mt-1">Real Estate CRM</div>
           </div>
         </div>
@@ -45,7 +45,7 @@ export default function Login() {
           <p className="text-white/70 mt-6 text-sm leading-relaxed max-w-sm">
             Capture leads from MagicBricks, 99acres, Google & Meta. Route them to the right
             executive. Move them through your funnel with WhatsApp, email & site visits — without
-            leaving Tasko.
+            leaving Propzel.
           </p>
         </div>
 
@@ -69,8 +69,8 @@ export default function Login() {
       <div className="flex items-center justify-center p-6 md:p-16">
         <div className="w-full max-w-md">
           <div className="md:hidden mb-8 flex items-center gap-3">
-            <div className="h-9 w-9 rounded-sm bg-forest text-wheat grid place-items-center font-display font-black">T</div>
-            <span className="font-display font-black text-xl text-forest tracking-tight">Tasko</span>
+            <div className="h-9 w-9 rounded-sm bg-forest text-wheat grid place-items-center font-display font-black">P</div>
+            <span className="font-display font-black text-xl text-forest tracking-tight">Propzel</span>
           </div>
 
           <div className="text-[10px] uppercase tracking-[0.22em] text-forest/50">Sign in</div>
@@ -78,7 +78,7 @@ export default function Login() {
             Welcome back.
           </h1>
           <p className="text-sm text-forest/60 mt-3">
-            Use one of the seeded accounts — admin, manager, or executive — to explore Tasko.
+            Use one of the seeded accounts — admin, manager, or executive — to explore Propzel.
           </p>
 
           <form onSubmit={submit} className="mt-10 space-y-5">

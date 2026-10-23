@@ -290,9 +290,11 @@ export default function LeadDetail() {
     setVisitProjectId(l.data.project_id || "");
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [leadId]);
+  const [missing, setMissing] = useState(false);
+  useEffect(() => { setMissing(false); load().catch((e) => { if ([403, 404].includes(e.response?.status)) setMissing(true); else toast.error(formatApiError(e.response?.data?.detail)); }); /* eslint-disable-next-line */ }, [leadId]);
   useEffect(() => { if (lead && window.location.search.includes("tab=whatsapp")) document.getElementById("lead-whatsapp")?.scrollIntoView({ behavior: "smooth" }); }, [lead]);
 
+  if (missing) return <div data-testid="lead-not-found" className="border border-dashed border-[#E6E4DD] rounded-sm p-12 text-center text-forest/60 text-sm">This lead no longer exists or you don't have access to it.</div>;
   if (!lead) return <div className="text-forest/50 text-sm">Loading lead…</div>;
 
   const owner = users.find((u) => u.id === lead.assigned_to);
@@ -401,7 +403,7 @@ export default function LeadDetail() {
               onClick={async () => {
                 try {
                   const { data } = await api.post(`/leads/${leadId}/call`);
-                  if (data.status === "pending_credentials") toast.info("CallerDesk keys not added yet — call logged as pending");
+                  if (data.status === "pending_credentials") toast.info("Business Campaign calling keys not added yet — call logged as pending");
                   else if (data.mock) toast.info("Twilio not configured — mock call logged");
                   else toast.success(`Ringing your phone… (${data.status})`);
                   load();
@@ -434,7 +436,7 @@ export default function LeadDetail() {
           <div id="lead-whatsapp" data-testid="lead-whatsapp-section" className="border border-[#E6E4DD] bg-white rounded-sm p-6">
             <div className="label-caps">WhatsApp</div>
             <h3 className="font-display font-bold text-xl text-forest tracking-tight mt-1 mb-4">Conversation</h3>
-            <WhatsAppChat fetchPath={`/leads/${leadId}/whatsapp`} sendPath={`/leads/${leadId}/whatsapp/messages`} syncPath={`/leads/${leadId}/whatsapp/sync`} height="h-[320px]" testId="lead-wa-chat" />
+            <WhatsAppChat fetchPath={`/leads/${leadId}/whatsapp`} sendPath={`/leads/${leadId}/whatsapp/messages`} syncPath={`/leads/${leadId}/whatsapp/sync`} leadName={lead?.name} height="h-[320px]" testId="lead-wa-chat" />
           </div>
 
           {/* Timeline */}

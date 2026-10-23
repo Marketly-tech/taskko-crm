@@ -1,3 +1,5 @@
+import asyncio
+
 from core import *  # noqa: F401,F403
 
 router = APIRouter(prefix="/api")
@@ -14,17 +16,42 @@ def _month_bounds(dt: datetime) -> tuple:
     return start, end
 
 
+def _parse_range(date_from: Optional[str], date_to: Optional[str], default: tuple) -> tuple:
+    try:
+        start = datetime.fromisoformat(date_from[:10]).replace(tzinfo=timezone.utc) if date_from else default[0]
+        end = datetime.fromisoformat(date_to[:10]).replace(tzinfo=timezone.utc) + timedelta(days=1) if date_to else default[1]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
+    if end <= start:
+        raise HTTPException(status_code=400, detail="'To' date must be on or after 'From' date")
+    return start, end
+
+
+def _buckets(start: datetime, end: datetime) -> list:
+    if (end - start).days <= 31:
+        out, d = [], start
+        while d < end:
+            out.append((d.strftime("%d %b"), d, min(d + timedelta(days=1), end)))
+            d += timedelta(days=1)
+        return out
+    out, d = [], start
+    while d < end:
+        ms, me = _month_bounds(d)
+        out.append((ms.strftime("%b-%y"), d, min(me, end)))
+        d = me
+    return out
+
+
 @router.get("/dashboard/monthly")
-async def dashboard_monthly(user: dict = Depends(get_current_user)):
-    """Month's Updates tab data."""
+async def dashboard_monthly(date_from: Optional[str] = None, date_to: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Month's Updates tab data (defaults to the current month)."""
     scope: dict = {}
     if user["role"] == "executive":
         scope["assigned_to"] = user["id"]
 
-    now = now_utc()
-    cur_start, cur_end = _month_bounds(now)
-    prev_dt = cur_start - timedelta(days=1)
-    prev_start, prev_end = _month_bounds(prev_dt)
+    cur_start, cur_end = _parse_range(date_from, date_to, _month_bounds(now_utc()))
+    prev_end = cur_start
+    prev_start = cur_start - (cur_end - cur_start)
 
     def iso(d):
         return d.isoformat()
@@ -54,12 +81,10 @@ async def dashboard_monthly(user: dict = Depends(get_current_user)):
     if prev_revenue > 0:
         revenue_pct = round(((cur_revenue - prev_revenue) / prev_revenue) * 100, 2)
 
-    # Telemetry — last 4 months by activity kind
+    # Telemetry — per day (<= 31 days) or per month within the range
     telemetry = []
-    for i in range(3, -1, -1):
-        month_dt = (cur_start.replace(day=15) - timedelta(days=30 * i))
-        ms, me = _month_bounds(month_dt)
-        row = {"label": ms.strftime("%b-%y"), "month": ms.strftime("%Y-%m")}
+    for label, ms, me in _buckets(cur_start, cur_end):
+        row = {"label": label}
         for kind_key, kinds in (
             ("outgoing_call", ["outgoing_call", "call"]),
             ("email_sent", ["email_sent", "email"]),
@@ -76,7 +101,7 @@ async def dashboard_monthly(user: dict = Depends(get_current_user)):
     stages = ALL_STAGES
     pipeline = []
     for s in stages:
-        pipeline.append({"stage": s, "count": await db.leads.count_documents({**scope, "stage": s})})
+        pipeline.append({"stage": s, "count": await db.leads.count_documents({**scope, "stage": s, "created_at": {"$gte": iso(cur_start), "$lt": iso(cur_end)}})})
 
     # Upcoming closures — proposals in draft/sent with validity ending soon OR leads in negotiation
     closures_raw = await db.leads.find({**scope, "stage": {"$in": ["negotiation", "site_visit"]}}, {"_id": 0}).sort("updated_at", -1).limit(8).to_list(8)
@@ -88,7 +113,7 @@ async def dashboard_monthly(user: dict = Depends(get_current_user)):
         top = top + [r for r in rest if r["id"] not in {t["id"] for t in top}]
 
     # Recent inquiries — latest 8 leads
-    recent = await db.leads.find(scope, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8)
+    recent = await db.leads.find({**scope, "created_at": {"$gte": iso(cur_start), "$lt": iso(cur_end)}}, {"_id": 0}).sort("created_at", -1).limit(8).to_list(8)
 
     return {
         "period": {"start": iso(cur_start), "end": iso(cur_end)},
@@ -103,14 +128,15 @@ async def dashboard_monthly(user: dict = Depends(get_current_user)):
 
 
 @router.get("/dashboard/action-items")
-async def dashboard_action_items(user: dict = Depends(get_current_user)):
+async def dashboard_action_items(date_from: Optional[str] = None, date_to: Optional[str] = None, user: dict = Depends(get_current_user)):
     scope: dict = {}
     if user["role"] == "executive":
         scope["assigned_to"] = user["id"]
 
     now = now_utc()
-    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    day_end = day_start + timedelta(days=1)
+    today = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    day_start, day_end = _parse_range(date_from, date_to, (today, today + timedelta(days=1)))
+    rng = {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
 
     def iso(d):
         return d.isoformat()
@@ -127,17 +153,16 @@ async def dashboard_action_items(user: dict = Depends(get_current_user)):
         "due_at": {"$gte": iso(day_start), "$lt": iso(day_end)},
     }, {"_id": 0}).sort("due_at", 1).to_list(100)
 
-    scheduled_calls = await db.follow_ups.count_documents({**scope, "status": "pending", "kind": "call"})
-    tasks = await db.follow_ups.count_documents({**scope, "status": "pending", "kind": {"$in": ["meeting", "email", "whatsapp"]}})
+    scheduled_calls = await db.follow_ups.count_documents({**scope, "status": "pending", "kind": "call", "due_at": rng})
+    todo_docs = await db.follow_ups.find({**scope, "status": "pending", "kind": {"$in": ["meeting", "email", "whatsapp"]}, "due_at": rng}, {"_id": 0}).sort("due_at", 1).to_list(100)
+    lead_names = {x["id"]: x.get("name") for x in await db.leads.find({"id": {"$in": [t.get("lead_id") for t in todo_docs]}}, {"_id": 0, "id": 1, "name": 1}).to_list(100)}
+    for t in todo_docs:
+        t["lead_name"] = lead_names.get(t.get("lead_id"))
 
-    planned_visits = await db.site_visits.find({
-        **scope,
-        "status": "scheduled",
-        "scheduled_at": {"$gte": iso(day_start - timedelta(days=1)), "$lt": iso(day_start + timedelta(days=7))},
-    }, {"_id": 0}).sort("scheduled_at", 1).to_list(100)
+    planned_visits = await db.site_visits.find({**scope, "status": "scheduled", "scheduled_at": rng}, {"_id": 0}).sort("scheduled_at", 1).to_list(100)
 
-    # Leads with no calls done — leads with no activities of call kind
-    lead_docs = await db.leads.find({**scope, "stage": {"$nin": ["booked", "lost"]}}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+    # Leads with no calls done — leads created in the range with no call activity
+    lead_docs = await db.leads.find({**scope, "stage": {"$nin": ["booked", "lost"]}, "created_at": rng}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
     lead_ids = [l["id"] for l in lead_docs]
     called_ids = set()
     if lead_ids:
@@ -161,19 +186,40 @@ async def dashboard_action_items(user: dict = Depends(get_current_user)):
             "missed_calls": missed,
             "todays_followups": len(todays_followups),
             "scheduled_calls": scheduled_calls,
-            "tasks": tasks,
+            "tasks": len(todo_docs),
         },
         "todays_followups": todays_followups,
+        "todo_list": todo_docs,
         "planned_visits": planned_visits,
         "no_call_leads": mask_leads(no_call_leads, user),
         "no_followup_leads": mask_leads(no_followup_leads, user),
     }
 
 
-# ---------------------------------------------------------------------------
-# REPORTS (aggregations)
-# ---------------------------------------------------------------------------
+CALL_KINDS = ["outgoing_call", "call", "incoming_call", "missed_call"]
+ANSWERED = ["connected", "completed", "answered", "answer", "in-progress"]
 
+
+@router.get("/dashboard/call-report")
+async def dashboard_call_report(date_from: Optional[str] = None, date_to: Optional[str] = None, user_id: Optional[str] = None,
+                                user: dict = Depends(require_roles("admin", "manager"))):
+    """Team activity card: call / SMS / email / follow-up counts for the selected period and user."""
+    start, end = _parse_range(date_from, date_to, _month_bounds(now_utc()))
+    q: dict = {"created_at": {"$gte": start.isoformat(), "$lt": end.isoformat()}}
+    if user_id and user_id != "all":
+        q["actor_id"] = user_id
+
+    async def count(kinds, extra=None):
+        return await db.activities.count_documents({**q, "kind": {"$in": kinds}, **(extra or {})})
+
+    outgoing, incoming, missed, sms, email, followups = await asyncio.gather(
+        count(["outgoing_call", "call"]), count(["incoming_call"]), count(["missed_call"]),
+        count(["sms_sent"]), count(["email_sent", "email"]), count(["followup_scheduled"]))
+    answered = await count(["outgoing_call", "call", "incoming_call"], {"$or": [{"meta.disposition": {"$in": ANSWERED}}, {"meta.status": {"$in": ANSWERED}}]})
+    unique = len(await db.activities.distinct("lead_id", {**q, "kind": {"$in": CALL_KINDS}, "lead_id": {"$ne": None}}))
+    return {"period": {"start": start.isoformat(), "end": end.isoformat()},
+            "outgoing_calls": outgoing, "answered": answered, "missed": missed, "unique_contacts": unique,
+            "incoming": incoming, "sms_sent": sms, "email_sent": email, "followups": followups}
 
 
 

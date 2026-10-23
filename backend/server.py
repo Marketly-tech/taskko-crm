@@ -1,18 +1,18 @@
-"""Tasko CRM - FastAPI app entrypoint."""
+"""Propzel CRM - FastAPI app entrypoint."""
 from core import *  # noqa: F401,F403
 from routes import auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp
 from routes.organizations import ensure_organizations, for_each_org
 from routes.eod import send_eod_email_to_admins
 from routes.notifications import refresh_notifications
 
-app = FastAPI(title="Tasko CRM API")
+app = FastAPI(title="Propzel CRM API")
 for _m in (auth_users, projects, leads, ops, catalog, dashboard, twilio_voice, notifications, eod, organizations, reports, callerdesk, whatsapp):
     app.include_router(_m.router)
 
 
 @app.get("/api/")
 async def root():
-    return {"service": "Tasko CRM", "version": "1.0.0"}
+    return {"service": "Propzel CRM", "version": "1.0.0"}
 
 
 app.add_middleware(
@@ -338,7 +338,7 @@ async def on_startup():
     except Exception as e:
         log.warning("Scheduler setup failed: %s", e)
 
-    log.info("Tasko CRM startup complete.")
+    log.info("Propzel CRM startup complete.")
 
 
 @app.on_event("shutdown")

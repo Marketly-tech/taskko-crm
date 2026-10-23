@@ -121,7 +121,7 @@ async def ensure_organizations() -> None:
     """Create default orgs, tag legacy docs, seed the Super Admin."""
     default = await raw_db.organizations.find_one({"slug": "tasko"})
     if not default:
-        default = {"id": new_id(), "name": "Tasko Realty", "slug": "tasko", "active": True, "created_at": now_utc().isoformat()}
+        default = {"id": new_id(), "name": "Propzel Realty", "slug": "tasko", "active": True, "created_at": now_utc().isoformat()}
         await raw_db.organizations.insert_one(default)
     for name in TENANT_COLLECTIONS:
         await raw_db[name].update_many({"organization_id": {"$exists": False}, "role": {"$ne": "super_admin"}} if name == "users" else {"organization_id": {"$exists": False}}, {"$set": {"organization_id": default["id"]}})
