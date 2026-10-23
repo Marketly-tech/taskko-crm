@@ -221,11 +221,10 @@ function EditLeadDialog({ lead, projects, onSaved }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <div className="label-caps mb-1.5">Project</div>
-              <Select value={form.project_id || "__none__"} onValueChange={(v) => setForm({ ...form, project_id: v === "__none__" ? "" : v })}>
-                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="—" /></SelectTrigger>
+              <div className="label-caps mb-1.5">Project *</div>
+              <Select value={form.project_id || undefined} onValueChange={(v) => setForm({ ...form, project_id: v })}>
+                <SelectTrigger data-testid="lead-edit-project" className={`h-10 rounded-sm ${form.project_id ? "border-[#E6E4DD]" : "border-clay"}`}><SelectValue placeholder="Pick a project" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
                   {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                 </SelectContent>
               </Select>

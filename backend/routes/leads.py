@@ -39,6 +39,29 @@ async def _notify_co_owners(lead: dict, user_ids: list) -> None:
         )
 
 
+async def _require_project(pid: Optional[str]) -> None:
+    if not pid:
+        raise HTTPException(status_code=400, detail="Project is required for every lead")
+    if not await db.projects.find_one({"id": pid}, {"_id": 1}):
+        raise HTTPException(status_code=400, detail="Selected project does not exist")
+
+
+class AssignProjectBody(BaseDoc):
+    project_id: str
+
+
+@router.get("/leads/unassigned-project")
+async def unassigned_project_count(user: dict = Depends(require_roles("admin", "manager"))):
+    return {"count": await db.leads.count_documents({"project_id": {"$in": [None, ""]}})}
+
+
+@router.post("/leads/unassigned-project/move")
+async def move_unassigned(body: AssignProjectBody, user: dict = Depends(require_roles("admin", "manager"))):
+    await _require_project(body.project_id)
+    r = await db.leads.update_many({"project_id": {"$in": [None, ""]}}, {"$set": {"project_id": body.project_id, "updated_at": now_utc().isoformat()}})
+    return {"moved": r.modified_count}
+
+
 @router.get("/leads")
 async def list_leads(
     project_id: Optional[str] = None,
@@ -52,7 +75,9 @@ async def list_leads(
     search = re.escape(search) if search else search
     q: dict = {}
     ands: list = []
-    if project_id:
+    if project_id == "none":
+        q["project_id"] = {"$in": [None, ""]}
+    elif project_id:
         q["project_id"] = project_id
     if stage:
         q["stage"] = stage
@@ -93,6 +118,7 @@ async def get_lead(lead_id: str, user: dict = Depends(get_current_user)):
 async def create_lead(body: LeadBody, actor: dict = Depends(get_current_user)):
     doc = body.model_dump()
     await _validate_members([doc.get("assigned_to"), *(doc.get("co_assigned_to") or [])])
+    await _require_project(doc.get("project_id"))
     doc["id"] = new_id()
     doc["created_at"] = now_utc().isoformat()
     doc["updated_at"] = doc["created_at"]
@@ -144,6 +170,8 @@ async def update_lead(lead_id: str, body: UpdateLeadBody, actor: dict = Depends(
     if actor["role"] == "executive":
         update.pop("co_assigned_to", None)
     await _validate_members([update.get("assigned_to"), *(update.get("co_assigned_to") or [])])
+    if "project_id" in update:
+        await _require_project(update["project_id"])
     if not update:
         raise HTTPException(status_code=400, detail="Nothing to update")
     update["updated_at"] = now_utc().isoformat()

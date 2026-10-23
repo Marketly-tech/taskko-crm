@@ -38,7 +38,7 @@ export default function Topbar() {
   const { pathname } = useLocation();
   const title = TITLES[pathname] || (pathname.startsWith("/leads/") ? "Lead" : pathname.startsWith("/callerdesk") ? "Business Campaign" : pathname.startsWith("/whatsapp") ? "WhatsApp Inbox" : "Propzel");
   // Project switcher only appears on pages where it actually filters data.
-  const SHOW_ON = new Set(["/projects", "/inventory", "/site-visits", "/follow-ups"]);
+  const SHOW_ON = new Set(["/leads", "/projects", "/inventory", "/site-visits", "/follow-ups"]);
   const showSwitcher = SHOW_ON.has(pathname);
 
   return (
@@ -69,7 +69,7 @@ export default function Topbar() {
           {showSwitcher && (
             <>
               <Building2 className="h-4 w-4 text-forest/60" />
-              <Select value={activeId || ""} onValueChange={(v) => setActive(v)}>
+              <Select value={activeId || "__all__"} onValueChange={(v) => setActive(v)}>
                 <SelectTrigger
                   data-testid={NAV.projectSwitcher}
                   className="w-[220px] h-9 rounded-sm border-[#E6E4DD] bg-white text-forest data-[placeholder]:text-forest/50"
@@ -78,6 +78,7 @@ export default function Topbar() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__all__">All projects</SelectItem>
+                  <SelectItem value="__none__" data-testid="project-option-unassigned">Unassigned project</SelectItem>
                   {projects.map((p) => (
                     <SelectItem key={p.id} value={p.id} data-testid={`project-option-${p.id}`}>
                       {p.name}

@@ -9,7 +9,9 @@ router = APIRouter(prefix="/api")
 @router.get("/site-visits")
 async def list_visits(project_id: Optional[str] = None, lead_id: Optional[str] = None, user: dict = Depends(get_current_user)):
     q: dict = {}
-    if project_id:
+    if project_id == "none":
+        q["project_id"] = {"$in": [None, ""]}
+    elif project_id:
         q["project_id"] = project_id
     if lead_id:
         q["lead_id"] = lead_id
@@ -84,7 +86,10 @@ async def delete_visit(visit_id: str, actor: dict = Depends(require_roles("admin
 # FOLLOW-UPS
 # ---------------------------------------------------------------------------
 @router.get("/follow-ups")
-async def list_followups(lead_id: Optional[str] = None, status_q: Optional[str] = Query(None, alias="status"), user: dict = Depends(get_current_user)):
+async def list_followups(lead_id: Optional[str] = None, status_q: Optional[str] = Query(None, alias="status"),
+                         date_from: Optional[str] = None, date_to: Optional[str] = None, stage: Optional[str] = None,
+                         project_id: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """date_from/date_to are ISO datetimes (inclusive from, exclusive to); stage is comma separated; project_id 'none' = no project."""
     q: dict = {}
     if lead_id:
         q["lead_id"] = lead_id
@@ -92,6 +97,19 @@ async def list_followups(lead_id: Optional[str] = None, status_q: Optional[str] 
         q["status"] = status_q
     if user["role"] == "executive":
         q["assigned_to"] = user["id"]
+    rng = {k: v for k, v in (("$gte", date_from), ("$lt", date_to)) if v}
+    if rng:
+        q["due_at"] = rng
+    lq: dict = {}
+    if stage:
+        lq["stage"] = {"$in": [s for s in stage.split(",") if s]}
+    if project_id == "none":
+        lq["project_id"] = {"$in": [None, ""]}
+    elif project_id:
+        lq["project_id"] = project_id
+    if lq:
+        ids = await db.leads.distinct("id", lq)
+        q["lead_id"] = {"$in": [i for i in ids if not lead_id or i == lead_id]}
     docs = await db.follow_ups.find(q, {"_id": 0}).sort("due_at", 1).to_list(2000)
     return docs
 

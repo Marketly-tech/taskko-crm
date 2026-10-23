@@ -174,7 +174,7 @@ export default function Inventory() {
   const { projects, activeId } = useProjects();
   const [units, setUnits] = useState([]);
   const [statusFilter, setStatusFilter] = useState("");
-  const [projectFilter, setProjectFilter] = useState(activeId && activeId !== "__all__" ? activeId : (projects[0]?.id || ""));
+  const [projectFilter, setProjectFilter] = useState(activeId && !["__all__", "__none__"].includes(activeId) ? activeId : (projects[0]?.id || ""));
   const canEdit = user?.role === "admin" || user?.role === "manager";
 
   useEffect(() => {

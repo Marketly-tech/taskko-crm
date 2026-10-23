@@ -38,6 +38,7 @@ function LeadCreateDialog({ onCreated, users, projects, activeProjectId }) {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (!form.project_id) { toast.error("Pick a project for this lead"); return; }
     setBusy(true);
     try {
       const body = { ...form };
@@ -97,11 +98,10 @@ function LeadCreateDialog({ onCreated, users, projects, activeProjectId }) {
               </Select>
             </div>
             <div>
-              <div className="label-caps mb-1.5">Project</div>
-              <Select value={form.project_id || "__none__"} onValueChange={(v) => setForm({ ...form, project_id: v === "__none__" ? "" : v })}>
-                <SelectTrigger className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="—" /></SelectTrigger>
+              <div className="label-caps mb-1.5">Project *</div>
+              <Select value={form.project_id || undefined} onValueChange={(v) => setForm({ ...form, project_id: v })}>
+                <SelectTrigger data-testid="lead-create-project" className="h-10 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Pick a project" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
                   {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -338,9 +338,34 @@ function LeadsTable({ leads, users }) {
   );
 }
 
+function UnassignedBanner({ count, projects, onMoved, onView }) {
+  const [pid, setPid] = useState("");
+  const [busy, setBusy] = useState(false);
+  const move = async () => {
+    if (!window.confirm(`Move all ${count} leads without a project to ${projects.find((p) => p.id === pid)?.name}?`)) return;
+    setBusy(true);
+    try { const { data } = await api.post("/leads/unassigned-project/move", { project_id: pid }); toast.success(`${data.moved} lead(s) moved`); onMoved(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } finally { setBusy(false); }
+  };
+  return (
+    <div data-testid="leads-unassigned-banner" className="border border-clay/30 bg-clay/5 rounded-sm px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-forest">
+      <span><b data-testid="leads-unassigned-count">{count}</b> lead{count === 1 ? "" : "s"} have no project.</span>
+      <button data-testid="leads-unassigned-view" onClick={onView} className="text-xs font-bold underline underline-offset-2 hover:text-clay">View them</button>
+      <div className="flex items-center gap-2 ml-auto">
+        <span className="text-xs text-forest/60">Move all to</span>
+        <Select value={pid || undefined} onValueChange={setPid}>
+          <SelectTrigger data-testid="leads-unassigned-project" className="w-[200px] h-8 rounded-sm border-[#E6E4DD] bg-white"><SelectValue placeholder="Pick a project" /></SelectTrigger>
+          <SelectContent>{projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+        </Select>
+        <button data-testid="leads-unassigned-move" disabled={!pid || busy} onClick={move} className="h-8 px-3 rounded-sm bg-forest text-white text-xs font-medium disabled:opacity-50">{busy ? "Moving…" : "Move"}</button>
+      </div>
+    </div>
+  );
+}
+
 export default function Leads() {
   const { user } = useAuth();
-  const { activeId } = useProjects();
+  const { activeId, projectParam, setActive } = useProjects();
   const [params, setParams] = useSearchParams();
   const [view, setView] = useState("kanban");
   const [leads, setLeads] = useState([]);
@@ -351,7 +376,13 @@ export default function Leads() {
   const [source, setSource] = useState(params.get("source") || "");
   const [execFilter, setExecFilter] = useState(params.get("assigned_to") || "");
   const [ownerMode, setOwnerMode] = useState(params.get("owner_mode") || "any");
-  const [projectFilter, setProjectFilter] = useState(params.get("project_id") || "");
+  const projectFilter = projectParam;
+  const [unassigned, setUnassigned] = useState(0);
+  useEffect(() => {
+    const p = params.get("project_id");
+    if (p) setActive(p === "none" ? "__none__" : p);
+    /* eslint-disable-next-line */
+  }, []);
   const [createdFilter, setCreatedFilter] = useState(params.get("created") || "");
   const [loading, setLoading] = useState(false);
   const [editLead, setEditLead] = useState(null);
@@ -363,7 +394,6 @@ export default function Leads() {
     if (source) next.set("source", source);
     if (execFilter) next.set("assigned_to", execFilter);
     if (execFilter && ownerMode !== "any") next.set("owner_mode", ownerMode);
-    if (projectFilter) next.set("project_id", projectFilter);
     if (createdFilter) next.set("created", createdFilter);
     setParams(next, { replace: true });
     // eslint-disable-next-line
@@ -392,6 +422,7 @@ export default function Leads() {
       setLeads(filtered);
       setUsers(usersR.data);
       setProjects(projR.data);
+      if (user?.role !== "executive") api.get("/leads/unassigned-project").then((r) => setUnassigned(r.data.count)).catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -442,7 +473,7 @@ export default function Leads() {
               <List className="h-3.5 w-3.5" /> List
             </button>
           </div>
-          <LeadCreateDialog users={users} projects={projects} activeProjectId={activeId !== "__all__" ? activeId : ""} onCreated={load} />
+          <LeadCreateDialog users={users} projects={projects} activeProjectId={!["__all__", "__none__"].includes(activeId) ? activeId : ""} onCreated={load} />
         </div>
       </div>
 
@@ -484,14 +515,9 @@ export default function Leads() {
             <SelectItem value="co_owner">Co-owner only</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={projectFilter || "__all__"} onValueChange={(v) => setProjectFilter(v === "__all__" ? "" : v)}>
-          <SelectTrigger data-testid={LEADS.filterProject} className="w-[180px] h-8 rounded-sm border-[#E6E4DD]"><SelectValue placeholder="Project" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">All projects</SelectItem>
-            {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
       </div>
+
+      {unassigned > 0 && <UnassignedBanner count={unassigned} projects={projects} onMoved={load} onView={() => setActive("__none__")} />}
 
       {loading ? (
         <div className="text-forest/50 text-sm">Loading…</div>

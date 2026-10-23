@@ -16,10 +16,9 @@ export function ProjectProvider({ children }) {
     try {
       const { data } = await api.get("/projects");
       setProjects(data);
-      if (!data.find((p) => p.id === activeId)) {
-        const first = data[0]?.id || "";
-        setActiveId(first);
-        localStorage.setItem("tasko.activeProject", first);
+      if (!["__all__", "__none__"].includes(activeId) && !data.find((p) => p.id === activeId)) {
+        setActiveId("__all__");
+        localStorage.setItem("tasko.activeProject", "__all__");
       }
     } finally {
       setLoading(false);
@@ -37,9 +36,11 @@ export function ProjectProvider({ children }) {
   };
 
   const active = projects.find((p) => p.id === activeId) || null;
+  // API value for the global picker: "" = all projects, "none" = leads without a project
+  const projectParam = activeId === "__none__" ? "none" : (activeId && activeId !== "__all__" ? activeId : "");
 
   return (
-    <ProjectCtx.Provider value={{ projects, active, activeId, setActive, refresh, loading }}>
+    <ProjectCtx.Provider value={{ projects, active, activeId, projectParam, setActive, refresh, loading }}>
       {children}
     </ProjectCtx.Provider>
   );

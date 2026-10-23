@@ -16,7 +16,7 @@ const STATUS_TONE = {
 };
 
 export default function SiteVisits() {
-  const { activeId, projects } = useProjects();
+  const { activeId, projectParam, projects } = useProjects();
   const [visits, setVisits] = useState([]);
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
@@ -25,7 +25,7 @@ export default function SiteVisits() {
 
   const load = async () => {
     const params = {};
-    if (activeId && activeId !== "__all__") params.project_id = activeId;
+    if (projectParam) params.project_id = projectParam;
     const [v, l, u] = await Promise.all([
       api.get("/site-visits", { params }),
       api.get("/leads", { params }),
