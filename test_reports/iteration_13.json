@@ -1,0 +1,38 @@
+{
+  "summary": "Calendar invites (.ics) for site visits tested end-to-end. Backend: 16/16 pytest passed: settings persist, calendar/status RBAC, calendar/test validation and provider error, invite on create (exec + co-owner + customer, seq 0, calendar_invite activity), past visit gets no invite, disabled calendar gets no invite, reschedule makes seq 1 and resets reminders_sent, resend makes seq 2, cancel makes seq 3 and status cancelled/failed, resend of a non-scheduled visit returns 400, resend of an unknown id returns 404, reminder tick claimed 1d+2h (not 10m) within about 70s and logged calendar_reminder. Frontend: Settings calendar toggle shows and hides the calendar-invite-settings block. Fields prefill, Save persists them, domain-status banner shows, and the test-send gives correct error toasts. On the Site Visits agenda the 'Invite failed' badge shows (provider error as tooltip) and the resend button shows an error toast. Provider errors seen were Resend rejecting example.com recipients and the key being restricted to sending; both are expected in preview.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/settings", "issue": "visit_duration_min and calendar_from_email are not validated: -30 and 'notanemail' were accepted and saved. A negative duration gives an ICS whose DTEND is before DTSTART. Add Field(ge=15, le=480) and EmailStr."},
+      {"endpoint": "POST /api/site-visits/{id}/resend-invite", "issue": "No ownership check. Any logged-in user in the org (including an executive) can resend the invite for any visit by its id."},
+      {"endpoint": "visit_reminder_tick", "issue": "A visit booked less than 2h ahead claims both 1d and 2h but sends one email labelled 'in 2 hours' even if the visit is, for example, 1h away. Consider using the real time left in the subject."},
+      {"endpoint": "send_visit_invite", "issue": "All recipients go in a single Resend 'to' call. One rejected address (for example an invalid customer email) makes the whole invite fail for the executive and co-owners too, and every recipient can see the others' emails. Consider one send per recipient."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Settings > Google Calendar invites", "issues": ["Input values (cal-from-email, cal-from-name, cal-duration) inherit text-forest/60 from the wrapping <label>, so the values look like greyed placeholders. Add text-forest to inputCls."]},
+      {"screen": "Site Visits agenda", "issues": ["Time column (w-16) wraps '03:27 AM' onto two lines.", "The Invite resend button also shows on past visits that are still 'scheduled'; clicking it only returns 'Not sent: visit is in the past'. Hide it for past visits.", "The header 'N scheduled' counts all filtered visits whatever their status."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v13_calendar_invites.py", "/app/test_reports/pytest/pytest_v13.xml"],
+  "action_items": [
+    "Validate visit_duration_min (15-480) and calendar_from_email (EmailStr) in SettingsBody",
+    "Add an ownership/role check on resend-invite for executives",
+    "Add text-forest to the CalendarInviteSettings input class for contrast",
+    "Hide the resend-invite button for past visits",
+    "Optional: send to each recipient separately so one bad address doesn't block the team's invite"
+  ],
+  "critical_code_review_comments": [
+    "queue_invite uses asyncio.create_task without keeping a reference, so the task could be garbage-collected mid-run. Keep a set of pending tasks.",
+    "delete_visit sends CANCEL synchronously, which blocks the request on the Resend call. Fine, but it is inconsistent with the queued PATCH path."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v13_calendar_invites.py"],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% of requested flows"},
+  "seed_data_creation": "TEST_ leads and visits were created and then deleted. Settings restored: google_calendar_enabled=true, calendar_from_email=visits@propzel.tech, calendar_from_name=Propzel Realty, visit_duration_min=60.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The activity field is 'kind', not 'type'. The reminder test waits up to 80s. Resend rejects example.com recipients, and the current key is send-only, so domain_status shows 'check failed: restricted key'. Email failures are expected in preview."
+}

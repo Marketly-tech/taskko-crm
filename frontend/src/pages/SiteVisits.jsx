@@ -61,7 +61,7 @@ export default function SiteVisits() {
         <div>
           <div className="label-caps">Site visits</div>
           <h2 className="font-display font-black text-3xl text-forest tracking-tight mt-1">
-            {filtered.length} scheduled
+            {filtered.filter((v) => v.status === "scheduled").length} scheduled
           </h2>
         </div>
         <div className="flex items-center gap-2">
@@ -98,8 +98,8 @@ export default function SiteVisits() {
                 const time = new Date(v.scheduled_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
                 return (
                   <div key={v.id} data-testid={VISIT.row(v.id)} className="px-5 py-4 flex items-center gap-4 hover:bg-bone-alt/30 transition-colors duration-100">
-                    <div className="w-16 shrink-0">
-                      <div className="font-display font-black text-2xl text-forest tabular-nums leading-none">{time}</div>
+                    <div className="w-24 shrink-0">
+                      <div className="font-display font-black text-2xl text-forest tabular-nums leading-none whitespace-nowrap">{time}</div>
                       <div className="text-[10px] uppercase tracking-[0.18em] text-forest/50 mt-1">{relTime(v.scheduled_at)}</div>
                     </div>
                     <div className="flex-1 min-w-0">
@@ -123,7 +123,7 @@ export default function SiteVisits() {
                     </span>
                     {v.status === "scheduled" && (
                       <div className="flex items-center gap-1">
-                        <button data-testid={`visit-resend-invite-${v.id}`} onClick={() => resendInvite(v.id)} title="Email the calendar invite again" className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150 inline-flex items-center gap-1"><CalendarCheck className="h-3.5 w-3.5" /> Invite</button>
+                        {new Date(v.scheduled_at) > new Date() && <button data-testid={`visit-resend-invite-${v.id}`} onClick={() => resendInvite(v.id)} title="Email the calendar invite again" className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150 inline-flex items-center gap-1"><CalendarCheck className="h-3.5 w-3.5" /> Invite</button>}
                         <button onClick={() => updateStatus(v.id, "completed")} className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150">Mark done</button>
                         <button onClick={() => updateStatus(v.id, "no_show")} className="text-xs px-2 h-8 rounded-sm border border-[#E6E4DD] text-forest hover:border-forest transition-colors duration-150">No show</button>
                       </div>

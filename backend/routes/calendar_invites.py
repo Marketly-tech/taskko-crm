@@ -74,6 +74,14 @@ def _html(title: str, v: dict, ctx: dict, sender: tuple, note: str) -> str:
     return f"<div style='font-family:Arial;color:#1F3D2B'><h2>{title}</h2><p>{note}</p><table>{body}</table><p style='color:#5C6661;font-size:12px'>— {sender[1]}</p></div>"
 
 
+async def _send_each(params: dict, to: list) -> tuple:
+    """One email per recipient so one bad address never blocks the others or exposes emails."""
+    errs = await asyncio.gather(*[_send({**params, "to": [t]}) for t in to])
+    ok = [t for t, e in zip(to, errs) if not e]
+    failed = {t: e for t, e in zip(to, errs) if e}
+    return ok, failed
+
+
 async def _send(params: dict) -> Optional[str]:
     if not (resend and resend.api_key):
         log.info("[MOCK] calendar email to %s · %s", params["to"], params["subject"])
@@ -104,14 +112,17 @@ async def send_visit_invite(visit_id: str, method: str = "REQUEST") -> dict:
     ics = build_ics(v, ctx, sender, method)
     what = {"REQUEST": "Site visit scheduled" if seq == 0 else "Site visit updated", "CANCEL": "Site visit cancelled"}[method]
     subject = f"{what} · {ctx['project'].get('name', 'Project')} · {datetime.fromisoformat(v['scheduled_at']).astimezone(IST).strftime('%d %b, %I:%M %p')}"
-    params = {"from": f"{sender[1]} <{sender[0]}>", "to": to, "subject": subject,
+    params = {"from": f"{sender[1]} <{sender[0]}>", "subject": subject,
               "html": _html(what, v, ctx, sender, "Tap <b>Yes</b> / <b>Add to calendar</b> on this invite to save it to Google Calendar." if method == "REQUEST" else "This visit has been cancelled and will be removed from your calendar."),
               "attachments": [{"filename": "invite.ics", "content": base64.b64encode(ics.encode()).decode(), "content_type": f'text/calendar; charset="UTF-8"; method={method}'}]}
-    err = await _send(params)
-    await db.site_visits.update_one({"id": visit_id}, {"$set": {"ics_sequence": seq, "invite_status": "failed" if err else ("cancelled" if method == "CANCEL" else "sent"),
-                                                               "invite_error": err, "invite_sent_to": to, "invite_sent_at": now_utc().isoformat()}})
-    await log_activity(v["lead_id"], None, "calendar_invite", f"Calendar {'cancellation' if method == 'CANCEL' else 'invite'} {'failed' if err else 'emailed'} to {', '.join(to)}", {"visit_id": visit_id, "error": err})
-    return {"sent": not err, "to": to, "error": err}
+    ok, failed = await _send_each(params, to)
+    err = "; ".join(f"{t}: {e}" for t, e in failed.items())[:600] or None
+    status = "failed" if not ok else ("cancelled" if method == "CANCEL" else ("partial" if failed else "sent"))
+    await db.site_visits.update_one({"id": visit_id}, {"$set": {"ics_sequence": seq, "invite_status": status, "invite_error": err,
+                                                               "invite_sent_to": ok or to, "invite_sent_at": now_utc().isoformat()}})
+    msg = f"Calendar {'cancellation' if method == 'CANCEL' else 'invite'} emailed to {', '.join(ok)}" if ok else f"Calendar invite failed for {', '.join(to)}"
+    await log_activity(v["lead_id"], None, "calendar_invite", msg + (f" · failed: {', '.join(failed)}" if ok and failed else ""), {"visit_id": visit_id, "error": err})
+    return {"sent": bool(ok), "to": ok, "failed": list(failed), "error": err}
 
 
 def queue_invite(visit_id: str, method: str = "REQUEST") -> None:
@@ -139,7 +150,9 @@ async def visit_reminder_tick() -> int:
         due = [(k, label) for k, delta, label in REMINDERS if left <= delta and k not in (v.get("reminders_sent") or [])]
         if not due:
             continue
-        key, label = due[-1]
+        key = due[-1][0]
+        mins = max(1, int(left.total_seconds() // 60))
+        label = "tomorrow" if key == "1d" else (f"in {mins // 60} hour{'s' if mins >= 120 else ''}" if mins >= 60 else f"in {mins} minutes")
         claim = await db.site_visits.update_one({"id": v["id"], "reminders_sent": {"$ne": key}}, {"$addToSet": {"reminders_sent": {"$each": [k for k, _ in due]}}})
         if not claim.modified_count:
             continue
@@ -147,10 +160,10 @@ async def visit_reminder_tick() -> int:
         to = [u["email"] for u in ctx["team"]] + ([ctx["lead"]["email"]] if ctx["lead"].get("email") else [])
         if not to:
             continue
-        err = await _send({"from": f"{sender[1]} <{sender[0]}>", "to": to, "subject": f"Reminder: site visit {label} · {ctx['project'].get('name', 'Project')}",
-                           "html": _html(f"Your site visit is {label}", v, ctx, sender, "A quick reminder about your upcoming site visit.")})
-        await log_activity(v["lead_id"], None, "calendar_reminder", f"Visit reminder ({key}) {'failed' if err else 'emailed'} to {', '.join(to)}", {"visit_id": v["id"], "error": err})
-        sent += 0 if err else 1
+        ok, failed = await _send_each({"from": f"{sender[1]} <{sender[0]}>", "subject": f"Reminder: site visit {label} · {ctx['project'].get('name', 'Project')}",
+                                       "html": _html(f"Your site visit is {label}", v, ctx, sender, "A quick reminder about your upcoming site visit.")}, to)
+        await log_activity(v["lead_id"], None, "calendar_reminder", f"Visit reminder ({key}) emailed to {', '.join(ok) or 'nobody'}" + (f" · failed: {', '.join(failed)}" if failed else ""), {"visit_id": v["id"]})
+        sent += 1 if ok else 0
     return sent
 
 
@@ -192,9 +205,12 @@ async def calendar_test(body: CalTestBody, user: dict = Depends(require_roles("a
 
 @router.post("/site-visits/{visit_id}/resend-invite")
 async def resend_invite(visit_id: str, user: dict = Depends(get_current_user)):
-    v = await db.site_visits.find_one({"id": visit_id}, {"_id": 0, "status": 1})
+    v = await db.site_visits.find_one({"id": visit_id}, {"_id": 0, "status": 1, "lead_id": 1, "assigned_to": 1})
     if not v:
         raise HTTPException(status_code=404, detail="Site visit not found")
+    lead = await db.leads.find_one({"id": v["lead_id"]}, {"_id": 0}) or {}
+    if user["role"] == "executive" and v.get("assigned_to") != user["id"] and not can_access_lead(lead, user):
+        raise HTTPException(status_code=403, detail="Not your site visit")
     if v.get("status") != "scheduled":
         raise HTTPException(status_code=400, detail="Only scheduled visits can be re-sent")
     r = await send_visit_invite(visit_id, "REQUEST")

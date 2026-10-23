@@ -27,6 +27,8 @@ Later request: merge features from the offline repos (CretiveMarketly/taskko-crm
 
 - Iteration 12 (Jun 2026): **Lead Sources rebuilt** (`routes/lead_sources.py`, page `/lead-sources`). One key per source (api, website, facebook, google_ads, 99acres, magicbricks, housing). Public ingest `/api/v1/leads` (X-API-KEY / Basic / Bearer / ?key) and `/api/v1/leads/{key}` (GET/POST, JSON/form/multipart/XML, Paramantra-compatible fields), `/api/v1/google-ads/{key}`, `/api/v1/meta/{key}` (verify + leadgen → Graph fetch with page token). Duplicate phone (last 10 digits) merges into existing lead (repeat_enquiry activity, enquiry_count). Round-robin per source executives; rep_id override. Live log per source (`lead_events`). Real-time SSE `/api/live/stream` → toast + chime + auto-refresh of Leads (~0.6s). Admin email alert via Resend (needs verified domain). Shareable per-source guide (copy/email/print). Old `/api/webhooks/leads/{source}` removed.
 
+- Iteration 13 (Jun 2026): **Google Calendar invites for site visits** (`routes/calendar_invites.py`). Settings toggle + org sender email/name/visit length + domain status + test invite. On create/reschedule/cancel/delete an .ics (METHOD REQUEST/CANCEL, stable UID, SEQUENCE) is emailed per-recipient to the assigned exec, co-owners and customer from the org's email. Reminder emails at 1d/2h/10m via APScheduler `visit-reminders` (atomic claim). Site Visits agenda shows invite status + resend button. Delivery requires the org's sender domain verified in Resend.
+
 ## Status of integrations
 - Twilio: live keys set (default calling provider).
 - Resend: key set (testing mode – unverified domain).

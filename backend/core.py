@@ -443,9 +443,9 @@ class SettingsBody(BaseDoc):
     whatsapp_enabled: Optional[bool] = None
     email_enabled: Optional[bool] = None
     google_calendar_enabled: Optional[bool] = None
-    calendar_from_email: Optional[str] = None
-    calendar_from_name: Optional[str] = None
-    visit_duration_min: Optional[int] = None
+    calendar_from_email: Optional[str] = Field(None, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    calendar_from_name: Optional[str] = Field(None, max_length=80)
+    visit_duration_min: Optional[int] = Field(None, ge=15, le=480)
     whatsapp_number: Optional[str] = None
     resend_from_email: Optional[str] = None
     auto_assign_enabled: Optional[bool] = None

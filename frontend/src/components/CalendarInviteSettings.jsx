@@ -3,7 +3,7 @@ import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { CheckCircle2, AlertTriangle } from "lucide-react";
 
-const inputCls = "w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest";
+const inputCls = "text-forest w-full h-10 border border-[#E6E4DD] rounded-sm px-3 text-sm focus:outline-none focus:border-forest";
 
 export const CalendarInviteSettings = ({ s, set, savedKey }) => {
   const [st, setSt] = useState(null);
