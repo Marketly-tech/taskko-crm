@@ -1,0 +1,15 @@
+{
+  "summary": "Deployment-readiness smoke test after the .gitignore change (the .env lines were removed). Backend 7/7 pass: admin login sets the access_token cookie, /api/auth/me works, a bad login returns 401, and an unauthenticated /api/leads returns 401. GET /api/leads, /api/dashboard/monthly, /api/lead-sources and /api/whatsapp/status all return 200 for admin. `git check-ignore` confirms backend/.env and frontend/.env are no longer ignored. Frontend: admin UI login goes to the Overview page (/). The Leads and Settings pages load and render content. The only console error is the expected 401 from the unauthenticated /auth/me check on the login page. No regressions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test_v18_deploy_smoke.py", "/app/test_reports/pytest/pytest_v18.xml"],
+  "action_items": [],
+  "critical_code_review_comments": ["The skipped-counter bug in _deliver_campaign reported in iteration_16 is still open. It was not part of this smoke test."],
+  "updated_files": ["/app/backend/tests/backend_test_v18_deploy_smoke.py (new)"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Only .gitignore changed. backend_test_v18_deploy_smoke.py is a fast smoke suite to run first (-n 0).",
+  "test_credentials": "admin@tasko.com/admin123 from /app/memory/test_credentials.md"
+}
