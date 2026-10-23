@@ -29,26 +29,17 @@ class CampaignPatchBody(BaseDoc):
     calls_per_minute: Optional[int] = None
 
 
-class CallerDeskSettingsBody(BaseDoc):
-    calling_provider: Optional[Literal["twilio", "callerdesk"]] = None
-    callerdesk_authcode: Optional[str] = None
-    callerdesk_virtual_number: Optional[str] = None
-    callerdesk_webhook_secret: Optional[str] = None
-
-
 def digits(num, last10: bool = False) -> str:
     d = "".join(ch for ch in str(num or "") if ch.isdigit())
     return d[-10:] if last10 and len(d) > 10 else d
 
 
 async def cd_settings() -> dict:
-    s = await db.settings.find_one({"id": "singleton"}, {"_id": 0}) or {}
+    """CallerDesk credentials come only from backend environment variables."""
     return {
-        "calling_provider": s.get("calling_provider") or "twilio",
-        "authcode": s.get("callerdesk_authcode") or os.environ.get("CALLERDESK_AUTHCODE", ""),
-        "virtual_number": s.get("callerdesk_virtual_number") or os.environ.get("CALLERDESK_VIRTUAL_NUMBER", ""),
-        "webhook_secret": s.get("callerdesk_webhook_secret") or os.environ.get("CALLERDESK_WEBHOOK_SECRET", ""),
-        "org_override": bool(s.get("callerdesk_authcode")),
+        "authcode": os.environ.get("CALLERDESK_AUTHCODE", "").strip(),
+        "virtual_number": os.environ.get("CALLERDESK_VIRTUAL_NUMBER", "").strip(),
+        "webhook_secret": os.environ.get("CALLERDESK_WEBHOOK_SECRET", "").strip(),
     }
 
 
@@ -194,17 +185,11 @@ async def _expire_stale(campaign_id: Optional[str] = None) -> None:
 async def callerdesk_status(user: dict = Depends(get_current_user)):
     s = await cd_settings()
     base = os.environ.get("BACKEND_PUBLIC_URL", "").rstrip("/")
-    return {"provider": s["calling_provider"], "configured": bool(s["authcode"] and s["virtual_number"]),
-            "virtual_number": mask_phone(s["virtual_number"]) if not is_admin(user) else s["virtual_number"],
-            "org_override": s["org_override"], "webhook_url": f"{base}/api/callerdesk/webhook?org=<your-org-slug>",
+    org = await raw_db.organizations.find_one({"id": user.get("active_organization_id")}, {"_id": 0, "slug": 1}) or {}
+    return {"configured": bool(s["authcode"] and s["virtual_number"]),
+            "virtual_number": s["virtual_number"] if is_admin(user) else mask_phone(s["virtual_number"]),
+            "webhook_url": f"{base}/api/callerdesk/webhook?org={org.get('slug', '')}" if is_admin(user) else None,
             "secret_configured": bool(s["webhook_secret"])}
-
-
-@router.patch("/callerdesk/settings")
-async def callerdesk_update_settings(body: CallerDeskSettingsBody, actor: dict = Depends(require_roles("admin"))):
-    update = {k: v.strip() if isinstance(v, str) else v for k, v in body.model_dump(exclude_none=True).items()}
-    await db.settings.update_one({"id": "singleton"}, {"$set": update}, upsert=True)
-    return await callerdesk_status(actor)
 
 
 @router.get("/callerdesk/dashboard")

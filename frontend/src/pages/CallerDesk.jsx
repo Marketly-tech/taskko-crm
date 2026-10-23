@@ -245,27 +245,14 @@ function LogsTab() {
   );
 }
 
-function SettingsTab({ status, reload }) {
-  const [form, setForm] = useState({ callerdesk_authcode: "", callerdesk_virtual_number: "", callerdesk_webhook_secret: "" });
-  const save = async (extra = {}) => {
-    try { await api.patch("/callerdesk/settings", { ...Object.fromEntries(Object.entries(form).filter(([, v]) => v)), ...extra }); toast.success("Saved"); setForm({ callerdesk_authcode: "", callerdesk_virtual_number: "", callerdesk_webhook_secret: "" }); reload(); } catch (e) { err(e); }
-  };
+function SettingsTab({ status }) {
   return (
-    <div className="grid lg:grid-cols-2 gap-6">
-      <div className="border border-[#E6E4DD] bg-white rounded-sm p-5 space-y-4">
-        <div className="flex items-center justify-between"><div><div className="font-display font-bold text-lg text-forest">Use Business Campaign calling (CallerDesk)</div><div className="text-xs text-forest/60">When off, the lead Call button keeps using Twilio. Campaign Dialer always dials via CallerDesk.</div></div>
-          <Switch data-testid="cd-provider-toggle" checked={status?.provider === "callerdesk"} onCheckedChange={(v) => save({ calling_provider: v ? "callerdesk" : "twilio" })} /></div>
-        <div className="text-sm">Status: <b data-testid="cd-config-status" className={status?.configured ? "text-[#2D6A4F]" : "text-clay"}>{status?.configured ? "Connected" : "Keys pending"}</b>{status?.virtual_number && <span className="text-forest/60"> · DID {status.virtual_number}</span>}</div>
-        <div><div className="label-caps mb-1">Webhook URL (paste in your CallerDesk account)</div><code data-testid="cd-webhook-url" className="block text-xs bg-bone-alt/60 p-2 rounded-sm break-all">{status?.webhook_url}</code></div>
-      </div>
-      <div className="border border-[#E6E4DD] bg-white rounded-sm p-5 space-y-3">
-        <div className="font-display font-bold text-lg text-forest">Keys for this organisation</div>
-        <div className="text-xs text-forest/60">Optional. Leave blank to use the account keys added for the whole app.</div>
-        {[["callerdesk_authcode", "Auth code"], ["callerdesk_virtual_number", "Virtual number (DID)"], ["callerdesk_webhook_secret", "Webhook secret"]].map(([k, l]) => (
-          <label key={k} className="block text-xs text-forest/60">{l}<input data-testid={`cd-set-${k}`} type={k === "callerdesk_virtual_number" ? "text" : "password"} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className={`${inputCls} w-full mt-1`} /></label>
-        ))}
-        <button data-testid="cd-settings-save" onClick={() => save()} className={`${btn} bg-forest text-white hover:bg-forest-soft`}>Save keys</button>
-      </div>
+    <div className="border border-[#E6E4DD] bg-white rounded-sm p-5 space-y-4 max-w-2xl" data-testid="cd-settings">
+      <div className="font-display font-bold text-lg text-forest">CallerDesk connection</div>
+      <div className="text-sm">Status: <b data-testid="cd-config-status" className={status?.configured ? "text-[#2D6A4F]" : "text-clay"}>{status?.configured ? "Connected" : "Keys pending"}</b>{status?.virtual_number && <span className="text-forest/60"> · DID {status.virtual_number}</span>}</div>
+      <div className="text-xs text-forest/60">All calls (lead Call button and Campaign Dialer) go through CallerDesk. Keys are managed securely on the server (CALLERDESK_AUTHCODE, CALLERDESK_VIRTUAL_NUMBER, CALLERDESK_WEBHOOK_SECRET) and never stored in the app.</div>
+      <div><div className="label-caps mb-1">Webhook URL (paste in your CallerDesk account)</div><code data-testid="cd-webhook-url" className="block text-xs bg-bone-alt/60 p-2 rounded-sm break-all">{status?.webhook_url}</code></div>
+      {!status?.secret_configured && <div data-testid="cd-secret-warning" className="text-xs text-clay">No webhook secret is set — anyone with the URL could post call updates. Add CALLERDESK_WEBHOOK_SECRET on the server.</div>}
     </div>
   );
 }
@@ -301,7 +288,7 @@ export default function BusinessCampaign() {
       {feature === "campaigns" && <CampaignsTab />}
       {feature === "message-campaigns" && <MessageCampaignsTab leads={leads} />}
       {feature === "logs" && <LogsTab />}
-      {feature === "settings" && user?.role === "admin" && <SettingsTab status={status} reload={loadStatus} />}
+      {feature === "settings" && user?.role === "admin" && <SettingsTab status={status} />}
     </div>
   );
 }
